@@ -32,7 +32,9 @@ public sealed class InstrumentDiscovery(IVisaResourceManager rm)
     {
         var found = await Task.Run(() => rm.FindResources("?*INSTR"), ct);
         var manual = new HashSet<string>(extraResources, StringComparer.OrdinalIgnoreCase);
-        var all = found.Concat(manual.Where(m => !found.Contains(m, StringComparer.OrdinalIgnoreCase))).ToList();
+        // LAN resources last: an unreachable host blocks inside viOpen for ~10 s, and that stalls every other VISA call.
+        var all = found.Concat(manual.Where(m => !found.Contains(m, StringComparer.OrdinalIgnoreCase)))
+            .OrderBy(IsLan).ToList();
         var results = new List<VisaResourceInfo>();
         foreach (var r in all)
         {
@@ -44,6 +46,8 @@ public sealed class InstrumentDiscovery(IVisaResourceManager rm)
         return results;
     }
 
+    private static bool IsLan(string resource) => resource.StartsWith("TCPIP", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Opens the resource, reads <c>*IDN?</c>, closes it again.</summary>
     public async Task<VisaResourceInfo> IdentifyAsync(string resource, bool manual, TimeSpan timeout, CancellationToken ct)
     {
@@ -51,7 +55,11 @@ public sealed class InstrumentDiscovery(IVisaResourceManager rm)
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(timeout + TimeSpan.FromSeconds(1));
+            // viOpen on a LAN resource can take ~10 s when the host is down and cannot be interrupted. Abandoning it
+            // early would leave it holding VISA, so LAN gets enough time to finish on its own.
+            var overall = timeout + TimeSpan.FromSeconds(1);
+            if (IsLan(resource) && overall < TimeSpan.FromSeconds(13)) overall = TimeSpan.FromSeconds(13);
+            timeoutCts.CancelAfter(overall);
             var work = Task.Run(async () =>
             {
                 t.Open(resource, (int)timeout.TotalMilliseconds);
