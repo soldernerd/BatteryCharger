@@ -49,7 +49,8 @@ try {
                 } else {
                     $appZip = Get-Zip $appAsset $tmp
                     Get-ChildItem $dir -File -Filter 'BatteryCharger.*' | Remove-Item -Force
-                    foreach ($d in 'Views', 'Assets') { if (Test-Path (Join-Path $dir $d)) { Remove-Item (Join-Path $dir $d) -Recurse -Force } }
+                    Get-ChildItem $dir -File -Filter '*.xbf' | Remove-Item -Force
+                    foreach ($d in 'Views', 'Controls', 'Assets') { if (Test-Path (Join-Path $dir $d)) { Remove-Item (Join-Path $dir $d) -Recurse -Force } }
                 }
                 [IO.Compression.ZipFile]::ExtractToDirectory($appZip, $dir)
             } else {

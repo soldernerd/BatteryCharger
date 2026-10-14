@@ -154,7 +154,8 @@ jobs:
           Compress-Archive -Path "publish\*" -DestinationPath "BatteryCharger-$v-win-x64.zip"
 
           $files = Get-ChildItem $pub -Recurse -File | ForEach-Object { [pscustomobject]@{ Full = $_.FullName; Rel = $_.FullName.Substring($pub.Length + 1) } }
-          $isApp = { param($rel) $rel -like 'BatteryCharger.*' -or $rel -like 'Views\*' -or $rel -like 'Assets\*' }
+          # Our own files: assemblies, the compiled XAML (*.xbf) and its folders. Everything else is .NET / Windows App SDK.
+          $isApp = { param($rel) $rel -like 'BatteryCharger.*' -or ($rel -notlike '*\*' -and $rel -like '*.xbf') -or $rel -like 'Views\*' -or $rel -like 'Controls\*' -or $rel -like 'Assets\*' }
           $app = @($files | Where-Object { & $isApp $_.Rel })
           $rt  = @($files | Where-Object { -not (& $isApp $_.Rel) })
 
