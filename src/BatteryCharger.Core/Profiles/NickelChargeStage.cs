@@ -41,7 +41,15 @@ public sealed class NickelChargeStage(
         {
             _ceilingSince ??= stageElapsed;
             if (stageElapsed - _ceilingSince.Value >= TimeSpan.FromSeconds(60))
+            {
+                // Reaching the ceiling long before the battery is charged, at a fraction of the set current, means the voltage
+                // needed to push the current is above the safe limit: high resistance (contact, protection circuit, worn cell).
+                if (s.Amps < 0.5 * amps && s.Ah < 0.05 * capacityAh)
+                    return new(StageAction.CompleteWithWarning,
+                        $"Voltage ceiling reached with only {s.Amps:0.000} A of the set {amps:0.###} A flowing: the battery or its connection has a high resistance " +
+                        "(poor contact, built-in protection circuit or a very worn cell). Charging was stopped at the safe voltage limit; check the contacts and the cell.");
                 return new(StageAction.CompleteWithWarning, "Voltage ceiling reached");
+            }
         }
         else _ceilingSince = null;
 

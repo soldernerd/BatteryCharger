@@ -14,6 +14,18 @@ public sealed class SleepInhibitor
     [DllImport("kernel32.dll")]
     private static extern uint SetThreadExecutionState(uint flags);
 
-    public void Acquire() => SetThreadExecutionState(EsContinuous | EsSystemRequired);
-    public void Release() => SetThreadExecutionState(EsContinuous);
+    private int _holders;
+
+    /// <summary>Several supplies can charge at once: Windows may sleep again only after the last one has released.</summary>
+    public void Acquire()
+    {
+        _holders++;
+        SetThreadExecutionState(EsContinuous | EsSystemRequired);
+    }
+
+    public void Release()
+    {
+        if (_holders > 0) _holders--;
+        if (_holders == 0) SetThreadExecutionState(EsContinuous);
+    }
 }

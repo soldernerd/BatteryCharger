@@ -1,3 +1,5 @@
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using BatteryCharger.App.Services;
 using BatteryCharger.App.ViewModels;
@@ -6,6 +8,7 @@ using BatteryCharger.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Graphics;
 using WinRT.Interop;
@@ -18,6 +21,8 @@ public sealed partial class MainWindow : Window
     private readonly nint _hwnd;
     private readonly VisaService _visa;
     private readonly SettingsService _settings;
+    private readonly SupplyRegistry _registry;
+    private readonly Dictionary<SupplyViewModel, ChargerPage> _pages = [];
     private bool _closeConfirmed;
 
     [DllImport("user32.dll")]
@@ -28,6 +33,7 @@ public sealed partial class MainWindow : Window
         var ctx = App.Services.GetRequiredService<WindowContext>();
         _visa = App.Services.GetRequiredService<VisaService>();
         _settings = App.Services.GetRequiredService<SettingsService>();
+        _registry = App.Services.GetRequiredService<SupplyRegistry>();
 
         InitializeComponent();
         _hwnd = WindowNative.GetWindowHandle(this);
@@ -49,6 +55,7 @@ public sealed partial class MainWindow : Window
             ctx.XamlRoot = Nav.XamlRoot;
             App.Services.GetRequiredService<ThemeService>().Apply();
         };
+        _registry.Supplies.CollectionChanged += OnSuppliesChanged;
         SettingsViewModel.DeveloperModeChanged += (_, _) => UpdateConsoleVisibility();
         UpdateConsoleVisibility();
 
@@ -67,12 +74,46 @@ public sealed partial class MainWindow : Window
         if (!_visa.IsAvailable && !_settings.Current.DeveloperMode)
         {
             // Everything that needs an instrument stays disabled; Settings remains reachable.
-            ContentFrame.Navigate(typeof(VisaMissingPage));
+            Host.Content = new VisaMissingPage();
             return;
         }
         ChargerItem.IsEnabled = true;
         ConsoleItem.IsEnabled = true;
         Nav.SelectedItem = ChargerItem;
+        // Look for the power supplies right away; every supported one appears as a tab below "Charger".
+        _registry.RefreshCommand.Execute(null);
+    }
+
+    /// <summary>Keeps the child items of "Charger" in step with the supplies the registry knows.</summary>
+    private void OnSuppliesChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        var selected = Nav.SelectedItem as NavigationViewItem;
+        var selectedSupply = selected?.Tag as SupplyViewModel;
+        ChargerItem.MenuItems.Clear();
+        foreach (var supply in _registry.Supplies)
+        {
+            var item = new NavigationViewItem { Content = supply.NavTitle, Tag = supply, Icon = new FontIcon { Glyph = "\uE945" } };
+            ToolTipService.SetToolTip(item, supply.IdentityText);
+            AutomationProperties.SetName(item, supply.NavTitle);
+            supply.PropertyChanged -= OnSupplyPropertyChanged;
+            supply.PropertyChanged += OnSupplyPropertyChanged;
+            ChargerItem.MenuItems.Add(item);
+            if (supply == selectedSupply) Nav.SelectedItem = item;
+        }
+        if (selectedSupply is not null && !_registry.Supplies.Contains(selectedSupply)) Nav.SelectedItem = ChargerItem;
+        // Children added while the parent is expanded are only realized after it is expanded again.
+        ChargerItem.IsExpanded = false;
+        ChargerItem.IsExpanded = true;
+    }
+
+    private void OnSupplyPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(SupplyViewModel.NavTitle) || sender is not SupplyViewModel supply) return;
+        foreach (var item in ChargerItem.MenuItems.OfType<NavigationViewItem>().Where(i => i.Tag == supply))
+        {
+            item.Content = supply.NavTitle;
+            AutomationProperties.SetName(item, supply.NavTitle);
+        }
     }
 
 
@@ -83,13 +124,22 @@ public sealed partial class MainWindow : Window
 
     private void OnSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (args.IsSettingsSelected) { ContentFrame.Navigate(typeof(SettingsPage)); return; }
-        if (args.SelectedItemContainer?.Tag is not string tag) return;
-        ContentFrame.Navigate(tag switch
+        if (args.IsSettingsSelected) { Host.Content = new SettingsPage(); return; }
+        var tag = args.SelectedItemContainer?.Tag;
+        _registry.Selected = tag as SupplyViewModel;
+        switch (tag)
         {
-            "console" => typeof(ScpiConsolePage),
-            _ => typeof(ChargerPage),
-        });
+            case SupplyViewModel supply:
+                if (!_pages.TryGetValue(supply, out var page)) _pages[supply] = page = new ChargerPage(supply);
+                Host.Content = page;
+                break;
+            case "console":
+                Host.Content = new ScpiConsolePage();
+                break;
+            case "charger":
+                Host.Content = new ChargerOverviewPage();
+                break;
+        }
     }
 
     private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
@@ -106,11 +156,9 @@ public sealed partial class MainWindow : Window
     {
         if (_closeConfirmed) return;
         args.Cancel = true;   // never close silently while the output could be on
-        var charger = App.Services.GetRequiredService<ChargerViewModel>();
-        if (await charger.ConfirmCloseAsync())
+        if (await _registry.ConfirmCloseAsync())
         {
             _closeConfirmed = true;
-            await App.Services.GetRequiredService<InstrumentService>().DisconnectAsync();
             Close();
         }
     }

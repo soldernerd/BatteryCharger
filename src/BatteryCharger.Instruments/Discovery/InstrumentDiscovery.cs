@@ -26,14 +26,17 @@ public sealed class InstrumentDiscovery(IVisaResourceManager rm)
     /// <summary>
     /// Enumerates VISA resources plus <paramref name="extraResources"/> (saved LAN instruments) and identifies each one
     /// with a per-instrument timeout. Reports results incrementally through <paramref name="progress"/>.
+    /// Resources in <paramref name="skip"/> (already open elsewhere, e.g. charging) are neither opened nor reported.
     /// </summary>
     public async Task<IReadOnlyList<VisaResourceInfo>> DiscoverAsync(
-        IEnumerable<string> extraResources, TimeSpan perInstrumentTimeout, IProgress<VisaResourceInfo>? progress, CancellationToken ct)
+        IEnumerable<string> extraResources, TimeSpan perInstrumentTimeout, IProgress<VisaResourceInfo>? progress, CancellationToken ct,
+        IReadOnlySet<string>? skip = null)
     {
         var found = await Task.Run(() => rm.FindResources("?*INSTR"), ct);
         var manual = new HashSet<string>(extraResources, StringComparer.OrdinalIgnoreCase);
         // LAN resources last: an unreachable host blocks inside viOpen for ~10 s, and that stalls every other VISA call.
         var all = found.Concat(manual.Where(m => !found.Contains(m, StringComparer.OrdinalIgnoreCase)))
+            .Where(r => skip is null || !skip.Contains(r))
             .OrderBy(IsLan).ToList();
         var results = new List<VisaResourceInfo>();
         foreach (var r in all)

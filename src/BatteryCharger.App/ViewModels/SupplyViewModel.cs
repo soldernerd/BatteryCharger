@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using BatteryCharger.App.Services;
 using BatteryCharger.Core.Batteries;
@@ -7,7 +7,8 @@ using BatteryCharger.Core.Instruments.Simulation;
 using BatteryCharger.Core.Logging;
 using BatteryCharger.Core.Profiles;
 using BatteryCharger.Core.Session;
-using BatteryCharger.Instruments.Discovery;
+using BatteryCharger.Core.Settings;
+using BatteryCharger.Instruments.Drivers;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
@@ -16,100 +17,136 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace BatteryCharger.App.ViewModels;
 
+/// <summary>Entry of the "number of cells" drop-down.</summary>
+public sealed record CellOption(int Count, string Label);
+
 /// <summary>
-/// State and commands of the Charger page: supply selection, battery inputs, profile summary and the running session.
-/// Singleton, so a running charge survives navigation to other pages.
+/// One tab: a single power supply with its own connection, battery inputs, profile, charge session and chart. Tabs share
+/// nothing but settings, so several supplies can charge different batteries at the same time.
 /// </summary>
-public sealed partial class ChargerViewModel : ObservableObject
+public sealed partial class SupplyViewModel : ObservableObject
 {
     private readonly SettingsService _settings;
-    private readonly VisaService _visa;
-    private readonly InstrumentService _instruments;
     private readonly DialogService _dialogs;
     private readonly SleepInhibitor _sleep;
-    private readonly ILogger<ChargerViewModel> _log;
-    private readonly DispatcherQueue _dispatcher;
+    private readonly InstrumentService _instruments;
+    private readonly ILogger<SupplyViewModel> _log;
+    private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
     private readonly DispatcherQueueTimer _uiTimer;
 
     private bool _loading = true;
-    private bool _updatingCells;
+    private bool _suppressTouch;
+    private bool _currentTouched;
+    private bool _connectAttempted;
     private ChannelLimits? _limits;
     private ChargeSession? _session;
     private Task? _runTask;
     private volatile Sample? _latest;
+    private EtaEstimator? _eta;
+    private object? _etaBox;                 // boxed TimeSpan?, written on the session thread
     private int _lastStageIndex = -1;
+    private CsvSessionLogger? _activeLogger;
+    private string? _logFilePath;
 
-    public ChargerViewModel(SettingsService settings, VisaService visa, InstrumentService instruments,
-        DialogService dialogs, SleepInhibitor sleep, ILogger<ChargerViewModel> log)
+    public SupplyViewModel(string resource, string model, string serial, bool isSimulator, string firmware,
+        SettingsService settings, VisaService visa, DialogService dialogs, SleepInhibitor sleep, ILoggerFactory loggers)
     {
+        Resource = resource;
+        Model = model;
+        Serial = serial;
+        Firmware = firmware;
+        IsSimulator = isSimulator;
         _settings = settings;
-        _visa = visa;
-        _instruments = instruments;
         _dialogs = dialogs;
         _sleep = sleep;
-        _log = log;
-        _dispatcher = DispatcherQueue.GetForCurrentThread();
+        _instruments = new InstrumentService(visa, settings, loggers.CreateLogger<InstrumentService>());
+        _log = loggers.CreateLogger<SupplyViewModel>();
+        _navTitle = model;
         _uiTimer = _dispatcher.CreateTimer();
         _uiTimer.Interval = TimeSpan.FromMilliseconds(250);   // chart and readouts update at <= 4 Hz
         _uiTimer.Tick += (_, _) => RefreshReadouts();
 
-        var b = settings.Current.Battery;
-        _technologyIndex = (int)b.Technology;
-        _nominalVoltage = b.NominalVoltage;
-        _capacityInMah = b.CapacityInMah;
-        _capacityValue = b.CapacityInMah ? b.CapacityAh * 1000 : b.CapacityAh;
-        _chargeRateC = b.ChargeRateC ?? CellChemistryInfo.For(b.Technology).DefaultRateC;
-        if (b.CellsOverride is { } cells && cells >= 1) { _autoCells = false; _cells = cells; }
-        else { _autoCells = true; _cells = CellChemistryInfo.DeriveCells(b.Technology, b.NominalVoltage); }
-
-        RebuildAdvancedFields(loadSaved: true);
+        LoadInputs();
         _loading = false;
+        UpdateCellOptions();
+        UpdateCurrentRange();
         Recompute();
-        RebuildSupplyList(null);
     }
 
-    // ---------------------------------------------------------------- supply
+    public string Resource { get; }
+    public string Model { get; }
+    public string Serial { get; }
+    public string Firmware { get; }
+    public bool IsSimulator { get; }
+    /// <summary>Key of the saved inputs: the serial number survives a change of the USB port, the resource does not.</summary>
+    public string Key => string.IsNullOrEmpty(Serial) ? Resource : Serial;
+    public string IdentityText => IsSimulator ? "Simulated power supply (demo, 60x speed)" : $"{Model}   S/N {Serial}   firmware {Firmware}";
 
-    public ObservableCollection<SupplyItem> Supplies { get; } = [];
+    /// <summary>Label in the navigation pane; the registry adds the serial number when two supplies share a model.</summary>
+    [ObservableProperty] private string _navTitle;
+
+    // ---------------------------------------------------------------- connection
+
     public ObservableCollection<ChannelItem> Channels { get; } = [];
-
-    [ObservableProperty] private SupplyItem? _selectedSupply;
     [ObservableProperty] private ChannelItem? _selectedChannel;
-    [ObservableProperty] private bool _isDiscovering;
-    [ObservableProperty] private string _discoveryStatus = "";
-    [ObservableProperty] private bool _isConnected;
-    [ObservableProperty] private string _identityText = "";
-    [ObservableProperty] private string? _outputWarning;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanEditInputs))] private bool _isConnected;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string _busyText = "";
-
-    public bool DeveloperMode => _settings.Current.DeveloperMode;
+    [ObservableProperty] private string? _outputWarning;
+    public bool HasMultipleChannels => Channels.Count > 1;
     public bool HasOutputWarning => !string.IsNullOrEmpty(OutputWarning);
-    public bool VisaAvailable => _visa.IsAvailable;
-    public bool CanChangeSupply => !IsConnected && !IsBusy;
+    public bool CanEditInputs => IsConnected && !IsBusy;
+    public bool IsDisconnectedIdle => !IsConnected && !IsBusy;
 
-    partial void OnSelectedSupplyChanged(SupplyItem? value) => ConnectCommand.NotifyCanExecuteChanged();
-
-    partial void OnIsConnectedChanged(bool value)
+    /// <summary>Connects on first use of the tab. Later calls do nothing; use <see cref="ConnectCommand"/> to retry.</summary>
+    public async Task EnsureConnectedAsync()
     {
-        OnPropertyChanged(nameof(CanChangeSupply));
-        ConnectCommand.NotifyCanExecuteChanged();
-        DisconnectCommand.NotifyCanExecuteChanged();
-        StartCommand.NotifyCanExecuteChanged();
+        if (_connectAttempted) return;
+        _connectAttempted = true;
+        await ConnectAsync();
     }
 
-    partial void OnIsBusyChanged(bool value)
+    [RelayCommand]
+    private async Task ConnectAsync()
     {
-        OnPropertyChanged(nameof(CanChangeSupply));
-        StartCommand.NotifyCanExecuteChanged();
-        ConnectCommand.NotifyCanExecuteChanged();
+        if (IsConnected || IsBusy) return;
+        IsBusy = true;
+        BusyText = "Connecting...";
+        OnPropertyChanged(nameof(IsDisconnectedIdle));
+        ClearBanner();
+        try
+        {
+            var psu = await _instruments.ConnectAsync(Resource, IsSimulator ? BuildSimulatedBattery() : null, CancellationToken.None);
+            Channels.Clear();
+            foreach (var ch in psu.Channels) Channels.Add(new ChannelItem(ch.DisplayName, ch));
+            OnPropertyChanged(nameof(HasMultipleChannels));
+            IsConnected = true;
+            SelectedChannel = Channels.FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Connect failed");
+            ShowBanner($"Could not connect to {Resource}: {ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+            OnPropertyChanged(nameof(IsDisconnectedIdle));
+            OnPropertyChanged(nameof(CanEditInputs));
+            ConnectCommand.NotifyCanExecuteChanged();
+        }
     }
+
+    /// <summary>Raw SCPI link of the connected instrument (SCPI console), null for the simulator or when not connected.</summary>
+    public ScpiLink? Link => _instruments.Link;
 
     partial void OnSelectedChannelChanged(ChannelItem? value)
     {
         OutputWarning = value?.Channel.OutputWarning;
         OnPropertyChanged(nameof(HasOutputWarning));
         _limits = null;
+        UpdateCellOptions();
+        UpdateCurrentRange();
         Recompute();
         if (value is not null) _ = LoadLimitsAsync(value.Channel);
     }
@@ -123,6 +160,8 @@ public sealed partial class ChargerViewModel : ObservableObject
             if (SelectedChannel?.Channel == channel)
             {
                 _limits = l;
+                UpdateCellOptions();
+                UpdateCurrentRange();
                 Recompute();
             }
         }
@@ -133,134 +172,13 @@ public sealed partial class ChargerViewModel : ObservableObject
         }
     }
 
-    private void RebuildSupplyList(IEnumerable<VisaResourceInfo>? found)
-    {
-        var keep = SelectedSupply?.Resource ?? _settings.Current.LastResource;
-        Supplies.Clear();
-        if (_settings.Current.DeveloperMode)
-            Supplies.Add(SimulatorItem());
-        foreach (var f in found ?? []) Supplies.Add(ToItem(f));
-        SelectedSupply = Supplies.FirstOrDefault(s => s.Resource == keep) ?? Supplies.FirstOrDefault(s => s.Supported);
-    }
-
-    private static SupplyItem ToItem(VisaResourceInfo f) =>
-        new(f.Supported ? f.Display : $"{f.Display}  [not a supported power supply]", f.Resource, f.Supported, false);
-
-    private bool _autoDiscovered;
-
-    /// <summary>Runs the first instrument search when the page opens, so the user does not have to press Refresh.</summary>
-    public void DiscoverOnFirstShow()
-    {
-        if (_autoDiscovered || !_visa.IsAvailable || IsConnected) return;
-        _autoDiscovered = true;
-        if (RefreshCommand.CanExecute(null)) RefreshCommand.Execute(null);
-    }
-
-    [RelayCommand(IncludeCancelCommand = true)]
-    private async Task RefreshAsync(CancellationToken ct)
-    {
-        if (!_visa.IsAvailable) return;
-        IsDiscovering = true;
-        DiscoveryStatus = "Searching for instruments...";
-        var results = new List<VisaResourceInfo>();
-        try
-        {
-            var progress = new Progress<VisaResourceInfo>(info =>
-            {
-                results.Add(info);
-                _log.LogInformation("Discovery: {Display} (supported: {Supported})", info.Display, info.Supported);
-                DiscoveryStatus = $"Found {results.Count}: {info.Display}";
-                RebuildSupplyList(results);   // usable straight away, not only after the slow LAN check
-            });
-            await _instruments.DiscoverAsync(progress, ct);
-            RebuildSupplyList(results);
-            DiscoveryStatus = results.Count == 0
-                ? "No instruments found. For LAN instruments use \"Add LAN instrument\"."
-                : $"{results.Count(r => r.Supported)} supported of {results.Count} instrument(s) found.";
-        }
-        catch (OperationCanceledException)
-        {
-            RebuildSupplyList(results);
-            DiscoveryStatus = "Search cancelled.";
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Discovery failed");
-            DiscoveryStatus = "Search failed: " + ex.Message;
-        }
-        finally { IsDiscovering = false; }
-    }
-
-    [RelayCommand]
-    private async Task AddLanAsync()
-    {
-        var text = await _dialogs.PromptLanInstrumentAsync();
-        if (text is null) return;
-        var resource = InstrumentDiscovery.ToResourceString(text);
-        if (!_settings.Current.LanInstruments.Contains(resource, StringComparer.OrdinalIgnoreCase))
-        {
-            _settings.Current.LanInstruments.Add(resource);
-            _settings.Save();
-        }
-        IsDiscovering = true;
-        DiscoveryStatus = $"Contacting {resource}...";
-        try
-        {
-            var info = await _instruments.IdentifyAsync(resource, CancellationToken.None);
-            var existing = Supplies.FirstOrDefault(s => s.Resource.Equals(resource, StringComparison.OrdinalIgnoreCase));
-            if (existing is not null) Supplies.Remove(existing);
-            var item = ToItem(info);
-            Supplies.Add(item);
-            SelectedSupply = item;
-            DiscoveryStatus = info.Supported ? $"Added {info.Display}" : $"Added, but: {info.Reason}";
-        }
-        finally { IsDiscovering = false; }
-    }
-
-    private bool CanConnect() => !IsConnected && !IsBusy && SelectedSupply is { Supported: true };
-
-    [RelayCommand(CanExecute = nameof(CanConnect))]
-    private async Task ConnectAsync()
-    {
-        var item = SelectedSupply!;
-        IsBusy = true;
-        BusyText = "Connecting...";
-        try
-        {
-            var psu = await _instruments.ConnectAsync(item.Resource, item.IsSimulator ? BuildSimulatedBattery() : null, CancellationToken.None);
-            Channels.Clear();
-            foreach (var ch in psu.Channels) Channels.Add(new ChannelItem(ch.DisplayName, ch));
-            IdentityText = $"{psu.Identity.Model}   S/N {psu.Identity.Serial}   firmware {psu.Identity.Firmware}";
-            IsConnected = true;
-            _settings.Current.LastResource = item.Resource;
-            _settings.Save();
-            SelectedChannel = Channels.FirstOrDefault();
-            ClearBanner();
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Connect failed");
-            ShowBanner($"Could not connect to {item.Resource}: {ex.Message}", InfoBarSeverity.Error);
-        }
-        finally { IsBusy = false; }
-    }
-
-    private bool CanDisconnect() => IsConnected && !IsSessionActive;
-
-    [RelayCommand(CanExecute = nameof(CanDisconnect))]
-    private async Task DisconnectAsync()
-    {
-        await _instruments.DisconnectAsync();
-        Channels.Clear();
-        SelectedChannel = null;
-        IdentityText = "";
-        IsConnected = false;
-    }
+    /// <summary>Closes the instrument session (application exit).</summary>
+    public Task DisconnectAsync() => _instruments.DisconnectAsync();
 
     private SimulatedBattery BuildSimulatedBattery()
     {
-        var chem = CellChemistryInfo.For(Technology);
-        var cells = EffectiveCells;
+        var chem = Chemistry;
+        var cells = Cells;
         var cap = CapacityAh > 0 ? CapacityAh : 2.0;
         var full = chem.IsNickel ? 1.45 : chem.TargetV;
         var empty = chem.Technology switch
@@ -277,44 +195,79 @@ public sealed partial class ChargerViewModel : ObservableObject
 
     public IReadOnlyList<CellChemistryInfo> Technologies => CellChemistryInfo.Table;
     public ObservableCollection<OptionField> AdvancedFields { get; } = [];
+    public ObservableCollection<CellOption> CellOptions { get; } = [];
 
-    [ObservableProperty] private int _technologyIndex;
-    [ObservableProperty] private double _nominalVoltage;
+    /// <summary>-1 until the user has picked a technology (the first step of every charge).</summary>
+    [ObservableProperty] private int _technologyIndex = -1;
+    [ObservableProperty] private CellOption? _selectedCell;
     [ObservableProperty] private double _capacityValue;
     [ObservableProperty] private bool _capacityInMah;
-    [ObservableProperty] private int _cells;
-    [ObservableProperty] private bool _autoCells = true;
-    [ObservableProperty] private double _chargeRateC;
+    [ObservableProperty] private double _currentAmps;
+    [ObservableProperty] private double _currentMin = 0.01;
+    [ObservableProperty] private double _currentMax = 1;
+    [ObservableProperty] private double _suggestedAmps;
 
+    public bool HasTechnology => TechnologyIndex >= 0;
     public BatteryTechnology Technology => (BatteryTechnology)Math.Clamp(TechnologyIndex, 0, Technologies.Count - 1);
     public CellChemistryInfo Chemistry => CellChemistryInfo.For(Technology);
-    public double CapacityAh => CapacityInMah ? CapacityValue / 1000.0 : CapacityValue;
-    public int EffectiveCells => AutoCells ? CellChemistryInfo.DeriveCells(Technology, NominalVoltage) : Math.Max(1, Cells);
-    public IReadOnlyList<double> VoltagePresets => Chemistry.PresetVoltages;
+    public int Cells => SelectedCell?.Count ?? 1;
+    public double CapacityAh => double.IsNaN(CapacityValue) ? 0 : CapacityInMah ? CapacityValue / 1000.0 : CapacityValue;
+    public bool HasCapacity => CapacityAh > 0;
+    public bool CurrentIsCustom => _currentTouched && Math.Abs(CurrentAmps - SuggestedAmps) > 1e-6;
     public string CapacityUnit => CapacityInMah ? "mAh" : "Ah";
-    public string RateHint => $"Default {Chemistry.DefaultRateC:0.##} C, maximum {Chemistry.MaxRateC:0.##} C";
+
+    public string CurrentHint
+    {
+        get
+        {
+            if (!HasCapacity) return "Enter the capacity to get a suggestion.";
+            var rate = CurrentAmps / CapacityAh;
+            return $"{rate:0.##} C. Suggested {SuggestedAmps:0.###} A ({Chemistry.DefaultRateC:0.##} C), maximum {CurrentMax:0.###} A for this battery and supply.";
+        }
+    }
+
+    /// <summary>Nominal and full-charge voltage of the chosen cell count, as a check against the battery label.</summary>
+    public string PackText
+    {
+        get
+        {
+            if (!HasTechnology) return "";
+            var c = Chemistry;
+            var n = Cells;
+            var nominal = n * c.CellNominalV;
+            var full = n * c.TargetV;
+            return $"{n} x {c.CellNominalV:0.0#} V = {nominal:0.0#} V nominal, charged up to {full:0.00} V" +
+                   (_limits is { } l && SelectedChannel is { Channel.HasVoltageRanges: false } ? $" (supply maximum {l.MaxVolts:0.#} V)" : "");
+        }
+    }
 
     partial void OnTechnologyIndexChanged(int value)
     {
-        if (_loading) return;
-        ChargeRateC = Chemistry.DefaultRateC;
+        OnPropertyChanged(nameof(HasTechnology));
         OnPropertyChanged(nameof(Technology));
         OnPropertyChanged(nameof(Chemistry));
-        OnPropertyChanged(nameof(VoltagePresets));
-        OnPropertyChanged(nameof(RateHint));
-        SyncCells();
+        if (_loading) return;
+        _currentTouched = false;
+        UpdateCellOptions(keepSelection: false);
         RebuildAdvancedFields(loadSaved: true);
+        UpdateCurrentRange();
         Recompute();
     }
 
-    partial void OnNominalVoltageChanged(double value)
+    partial void OnSelectedCellChanged(CellOption? value)
     {
-        SyncCells();
+        if (_loading) return;
+        OnPropertyChanged(nameof(Cells));
         Recompute();
     }
 
-    partial void OnCapacityValueChanged(double value) => Recompute();
-    partial void OnChargeRateCChanged(double value) => Recompute();
+    partial void OnCapacityValueChanged(double value)
+    {
+        OnPropertyChanged(nameof(HasCapacity));
+        if (_loading) return;
+        UpdateCurrentRange();
+        Recompute();
+    }
 
     partial void OnCapacityInMahChanged(bool value)
     {
@@ -323,47 +276,103 @@ public sealed partial class ChargerViewModel : ObservableObject
         CapacityValue = value ? CapacityValue * 1000 : CapacityValue / 1000;
     }
 
-    partial void OnCellsChanged(int value)
+    partial void OnCurrentAmpsChanged(double value)
     {
-        if (_loading || _updatingCells) return;
-        AutoCells = false;
+        if (_loading) return;
+        if (!_suppressTouch && !double.IsNaN(value)) _currentTouched = true;
+        OnPropertyChanged(nameof(CurrentIsCustom));
+        OnPropertyChanged(nameof(CurrentHint));
         Recompute();
     }
-
-    partial void OnAutoCellsChanged(bool value)
-    {
-        if (value) SyncCells();
-        Recompute();
-    }
-
-    private void SyncCells()
-    {
-        if (_loading || !AutoCells) return;
-        _updatingCells = true;
-        Cells = CellChemistryInfo.DeriveCells(Technology, NominalVoltage);
-        _updatingCells = false;
-    }
-
-    /// <summary>Number-box friendly view of the cell count (shows the derived value while automatic).</summary>
-    public double CellsValue
-    {
-        get => EffectiveCells;
-        set
-        {
-            if (double.IsNaN(value)) return;
-            Cells = Math.Max(1, (int)Math.Round(value));
-        }
-    }
-
-    public void ApplyVoltagePreset(double volts) => NominalVoltage = volts;
 
     [RelayCommand]
-    private void ResetCells() => AutoCells = true;
+    private void UseSuggestedCurrent()
+    {
+        _currentTouched = false;
+        UpdateCurrentRange();
+        Recompute();
+    }
+
+    /// <summary>Rebuilds the cell drop-down for the chemistry and the supply's voltage rating.</summary>
+    private void UpdateCellOptions(bool keepSelection = true)
+    {
+        if (!HasTechnology) { CellOptions.Clear(); SelectedCell = null; return; }
+        var c = Chemistry;
+        var max = c.IsNickel ? 12 : c.Technology == BatteryTechnology.LeadAcid ? 12 : 8;
+        if (_limits is { } l && SelectedChannel is { Channel.HasVoltageRanges: false })
+            max = Math.Min(max, Math.Max(1, (int)Math.Floor(l.MaxVolts / c.TargetV + 1e-9)));
+        var keep = keepSelection ? SelectedCell?.Count : null;
+        var wanted = keep ?? _pendingCells ?? c.PresetVoltages.Select(v => CellChemistryInfo.DeriveCells(c.Technology, v)).FirstOrDefault(1);
+        _pendingCells = null;
+        CellOptions.Clear();
+        for (var n = 1; n <= max; n++) CellOptions.Add(new CellOption(n, n == 1 ? "1 cell" : $"{n} cells"));
+        SelectedCell = CellOptions.FirstOrDefault(o => o.Count == wanted) ?? CellOptions.First();
+    }
+
+    private int? _pendingCells;
+
+    /// <summary>Recomputes the allowed current range and the suggestion; keeps a user-chosen current while it stays legal.</summary>
+    private void UpdateCurrentRange()
+    {
+        var chem = Chemistry;
+        var cap = CapacityAh;
+        var max = cap > 0 ? chem.MaxRateC * cap : 1.0;
+        var min = 0.01;
+        if (_limits is { } l)
+        {
+            max = Math.Min(max, l.MaxAmps);
+            min = Math.Max(min, l.MinAmps);
+        }
+        if (max < min) max = min;
+        var suggested = cap > 0 ? Math.Clamp(Math.Round(chem.DefaultRateC * cap, 3), min, max) : min;
+
+        _suppressTouch = true;
+        try
+        {
+            CurrentMin = min;
+            CurrentMax = max;
+            SuggestedAmps = suggested;
+            CurrentAmps = _currentTouched ? Math.Clamp(double.IsNaN(CurrentAmps) ? suggested : CurrentAmps, min, max) : suggested;
+        }
+        finally { _suppressTouch = false; }
+        OnPropertyChanged(nameof(CurrentIsCustom));
+        OnPropertyChanged(nameof(CurrentHint));
+    }
+
+    private void LoadInputs()
+    {
+        if (!_settings.Current.SupplyInputs.TryGetValue(Key, out var saved)) return;
+        TechnologyIndex = (int)saved.Technology;
+        CapacityInMah = saved.CapacityInMah;
+        CapacityValue = saved.CapacityInMah ? saved.CapacityAh * 1000 : saved.CapacityAh;
+        _pendingCells = saved.CellsOverride ?? CellChemistryInfo.DeriveCells(saved.Technology, saved.NominalVoltage);
+        if (saved.ChargeCurrentAmps is { } a && a > 0)
+        {
+            _currentTouched = true;
+            CurrentAmps = a;
+        }
+        RebuildAdvancedFields(loadSaved: true);
+    }
+
+    private void PersistInputs()
+    {
+        _settings.Current.SupplyInputs[Key] = new BatteryInputs
+        {
+            Technology = Technology,
+            NominalVoltage = Cells * Chemistry.CellNominalV,
+            CapacityAh = CapacityAh,
+            CapacityInMah = CapacityInMah,
+            CellsOverride = Cells,
+            ChargeCurrentAmps = _currentTouched ? CurrentAmps : null,
+        };
+        _settings.Save();
+    }
 
     private void RebuildAdvancedFields(bool loadSaved)
     {
         foreach (var f in AdvancedFields) f.ValueEdited -= OnAdvancedEdited;
         AdvancedFields.Clear();
+        if (!HasTechnology) return;
         var options = ProfileOptions.Defaults(Technology);
         var saved = loadSaved ? _settings.Current.AdvancedOverrides : null;
         if (saved is not null)
@@ -407,8 +416,12 @@ public sealed partial class ChargerViewModel : ObservableObject
         return o;
     }
 
-    private BatteryDescriptor BuildBattery() =>
-        new(Technology, NominalVoltage, CapacityAh, EffectiveCells, ChargeRateC);
+    private BatteryDescriptor BuildBattery()
+    {
+        var cap = CapacityAh;
+        var amps = double.IsNaN(CurrentAmps) ? 0 : CurrentAmps;
+        return new BatteryDescriptor(Technology, Cells * Chemistry.CellNominalV, cap, Cells, cap > 0 ? amps / cap : 0);
+    }
 
     // ---------------------------------------------------------------- profile summary
 
@@ -423,14 +436,27 @@ public sealed partial class ChargerViewModel : ObservableObject
     private void Recompute()
     {
         if (_loading) return;
+        OnPropertyChanged(nameof(PackText));
+        if (!HasTechnology)
+        {
+            Profile = null;
+            Fill(ProfileLines, []);
+            Fill(ProfileWarnings, []);
+            Fill(ProfileErrors, []);
+            OnPropertyChanged(nameof(HasWarnings));
+            OnPropertyChanged(nameof(HasErrors));
+            StartCommand.NotifyCanExecuteChanged();
+            return;
+        }
         // Range-capable supplies only switch range at start, so voltage limits are not checked against the current range here.
         var lim = IsConnected && SelectedChannel is { Channel.HasVoltageRanges: false } ? _limits : null;
         var p = ChargeProfileFactory.Create(BuildBattery(), BuildOptions(), lim);
         Profile = p;
-        OnPropertyChanged(nameof(CellsValue));
+        // Without a capacity the profile errors (capacity, rate) only repeat the same missing input.
+        var errors = HasCapacity ? p.Errors.ToList() : ["Enter the battery capacity."];
         Fill(ProfileLines, p.IsValid ? p.SummaryLines : []);
         Fill(ProfileWarnings, p.Warnings);
-        Fill(ProfileErrors, p.Errors);
+        Fill(ProfileErrors, errors);
         if (SelectedChannel is { Channel.HasVoltageRanges: true } && IsConnected)
             ProfileWarnings.Add("This supply has voltage ranges; the smallest suitable range is selected automatically when charging starts.");
         OnPropertyChanged(nameof(HasWarnings));
@@ -488,19 +514,28 @@ public sealed partial class ChargerViewModel : ObservableObject
     [ObservableProperty] private string _energyText = "-";
     [ObservableProperty] private string _modeText = "-";
     [ObservableProperty] private string _setpointText = "-";
+    [ObservableProperty] private string _etaText = "-";
+    [ObservableProperty] private string _etaDetail = "";
     [ObservableProperty] private string _logFileName = "";
     [ObservableProperty] private string _resultTitle = "";
     [ObservableProperty] private string _resultDetails = "";
-    private string? _logFilePath;
 
     partial void OnIsSessionActiveChanged(bool value)
     {
-        DisconnectCommand.NotifyCanExecuteChanged();
         StartCommand.NotifyCanExecuteChanged();
+        NavTitle = value ? $"{BaseNavTitle}  (charging)" : BaseNavTitle;
     }
 
+    /// <summary>Navigation label without the charging marker; set by the registry.</summary>
+    public string BaseNavTitle
+    {
+        get => _baseNavTitle ?? Model;
+        set { _baseNavTitle = value; NavTitle = IsSessionActive ? $"{value}  (charging)" : value; }
+    }
+    private string? _baseNavTitle;
+
     private bool CanStart() =>
-        IsConnected && !IsBusy && !IsSessionActive && SelectedChannel is not null && Profile is { IsValid: true };
+        IsConnected && !IsBusy && !IsSessionActive && HasTechnology && HasCapacity && SelectedChannel is not null && Profile is { IsValid: true };
 
     [RelayCommand(CanExecute = nameof(CanStart))]
     private async Task StartAsync()
@@ -549,7 +584,7 @@ public sealed partial class ChargerViewModel : ObservableObject
                 return;
             }
 
-            var supplyText = $"{_instruments.Current?.Identity.Model} {channel.DisplayName}";
+            var supplyText = $"{Model} {channel.DisplayName}";
             if (!await _dialogs.ConfirmChargeAsync(profile, pre, supplyText, channel.OutputWarning)) return;
 
             PersistInputs();
@@ -563,14 +598,15 @@ public sealed partial class ChargerViewModel : ObservableObject
         finally
         {
             IsBusy = false;
+            OnPropertyChanged(nameof(CanEditInputs));
         }
     }
 
     private void StartSession(IPowerSupplyChannel channel, ChargeProfile profile, bool allowLowVoltageStart)
     {
         var psu = _instruments.Current!;
-        var simulated = psu is FakePowerSupply;
         var s = _settings.Current;
+        var simulated = psu is FakePowerSupply;
         ISessionClock clock = simulated ? new ScaledClock(InstrumentService.SimulatorTimeScale) : new StopwatchClock();
         var logger = new CsvSessionLogger(s.EffectiveLogFolder, s.CsvSeparatorChar);
         var session = new ChargeSession(channel, profile.Battery, profile, logger, new SessionOptions
@@ -585,6 +621,8 @@ public sealed partial class ChargerViewModel : ObservableObject
 
         Chart.Clear();
         _latest = null;
+        _etaBox = null;
+        _eta = new EtaEstimator(profile);
         _lastStageIndex = -1;
         _logFilePath = null;
         LogFileName = "";
@@ -597,7 +635,7 @@ public sealed partial class ChargerViewModel : ObservableObject
         _activeLogger = logger;
         _sleep.Acquire();
         _uiTimer.Start();
-        _log.LogInformation("Charge started: {Tech} {Cells}S {Ah} Ah", profile.Battery.Technology, profile.Battery.CellsInSeries, profile.Battery.CapacityAh);
+        _log.LogInformation("Charge started on {Supply}: {Tech} {Cells}S {Ah} Ah", Model, profile.Battery.Technology, profile.Battery.CellsInSeries, profile.Battery.CapacityAh);
         _runTask = RunSessionAsync(session, logger);
     }
 
@@ -628,7 +666,7 @@ public sealed partial class ChargerViewModel : ObservableObject
         _activeLogger = null;
         await session.DisposeAsync();
         await logger.DisposeAsync();
-        _log.LogInformation("Charge ended: {Reason} - {Message}", result.Reason, result.Message);
+        _log.LogInformation("Charge ended on {Supply}: {Reason} - {Message}", Model, result.Reason, result.Message);
     }
 
     private void ShowResult(SessionResult r)
@@ -648,6 +686,8 @@ public sealed partial class ChargerViewModel : ObservableObject
             EndReason.UserStopped => "Stopped",
             _ => "Faulted",
         };
+        EtaText = r.Reason is EndReason.Completed or EndReason.CompletedWithWarning ? "Done" : "-";
+        EtaDetail = "";
         if (r.Reason == EndReason.Fault)
             ShowBanner("FAULT: " + r.Message, InfoBarSeverity.Error);       // stays until dismissed
         else if (r.Reason == EndReason.CompletedWithWarning)
@@ -666,6 +706,7 @@ public sealed partial class ChargerViewModel : ObservableObject
                 Chart.AddMarker(s.Elapsed.TotalSeconds, u.Stage);
             }
             _latest = s;
+            _etaBox = new EtaBox(_eta?.Update(s));
         }
         if (u.Sample is null && u.IsWarning && u.Message is not null && !u.State.IsTerminal())
             ShowBanner(u.Message, InfoBarSeverity.Warning);
@@ -679,6 +720,7 @@ public sealed partial class ChargerViewModel : ObservableObject
         });
     }
 
+    private sealed record EtaBox(TimeSpan? Remaining);
 
     private void RefreshReadouts()
     {
@@ -695,16 +737,28 @@ public sealed partial class ChargerViewModel : ObservableObject
             SetpointText = $"{s.VoltageSet:0.000} V / {s.CurrentLimit:0.###} A";
             StageText = s.Stage;
         }
+        if (IsSessionActive && _etaBox is EtaBox box)
+        {
+            if (box.Remaining is { } rem)
+            {
+                if (rem == TimeSpan.Zero) { EtaText = "Charged"; EtaDetail = ""; }
+                else
+                {
+                    EtaText = "in " + EtaEstimator.Format(rem);
+                    EtaDetail = rem >= EtaEstimator.Cap ? "" : $"about {DateTime.Now + rem:HH:mm}, up to (assumes an empty battery)";
+                }
+            }
+            else { EtaText = "calculating..."; EtaDetail = ""; }
+        }
         if (_activeLogger?.FilePath is { } path) LogFileName = Path.GetFileName(path);   // known once the session opened the log
         ChartInvalidated?.Invoke(this, EventArgs.Empty);
     }
 
-    private CsvSessionLogger? _activeLogger;
-
     private void ResetReadouts()
     {
         ElapsedText = "0:00:00";
-        VoltageText = CurrentText = PowerText = ChargeText = EnergyText = ModeText = SetpointText = "-";
+        VoltageText = CurrentText = PowerText = ChargeText = EnergyText = ModeText = SetpointText = EtaText = "-";
+        EtaDetail = "";
         StageText = "";
     }
 
@@ -766,42 +820,10 @@ public sealed partial class ChargerViewModel : ObservableObject
         catch (Exception ex) { _log.LogWarning(ex, "Could not open the log file"); }
     }
 
-    /// <summary>Called when the window is closing. Returns true when the window may close.</summary>
-    public async Task<bool> ConfirmCloseAsync()
+    /// <summary>Stops a running charge (application exit) and waits until the output is off.</summary>
+    public async Task StopForShutdownAsync()
     {
-        if (!IsSessionActive) return true;
-        var stop = await _dialogs.ConfirmAsync("Charging in progress",
-            "A charge is running. Closing the application will stop charging and switch the power supply output off.",
-            "Stop charging and exit", "Cancel");
-        if (!stop) return false;
         if (_session is { } s) await s.RequestStopAsync();
         if (_runTask is { } t) await t;
-        return true;
     }
-
-    private void PersistInputs()
-    {
-        var b = _settings.Current.Battery;
-        b.Technology = Technology;
-        b.NominalVoltage = NominalVoltage;
-        b.CapacityInMah = CapacityInMah;
-        b.CapacityAh = CapacityAh;
-        b.CellsOverride = AutoCells ? null : Cells;
-        b.ChargeRateC = ChargeRateC;
-        _settings.Save();
-    }
-
-    /// <summary>Re-reads settings that can change on the Settings page (developer mode shows the simulated supply).</summary>
-    public void OnSettingsChanged()
-    {
-        OnPropertyChanged(nameof(DeveloperMode));
-        var sim = Supplies.FirstOrDefault(s => s.IsSimulator);
-        if (DeveloperMode && sim is null)
-            Supplies.Insert(0, SimulatorItem());
-        else if (!DeveloperMode && sim is not null && !(IsConnected && SelectedSupply == sim))
-            Supplies.Remove(sim);
-    }
-
-    private static SupplyItem SimulatorItem() =>
-        new("Simulated power supply (demo, 60x speed)", InstrumentService.SimulatorResource, true, true);
 }

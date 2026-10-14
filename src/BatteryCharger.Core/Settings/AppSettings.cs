@@ -11,6 +11,8 @@ public sealed class BatteryInputs
     public bool CapacityInMah { get; set; }
     public int? CellsOverride { get; set; }
     public double? ChargeRateC { get; set; }
+    /// <summary>Charge current the user chose; null means the suggested value.</summary>
+    public double? ChargeCurrentAmps { get; set; }
 }
 
 /// <summary>Persisted settings (spec section 10). Unknown JSON fields are ignored, missing fields keep their defaults.</summary>
@@ -20,6 +22,8 @@ public sealed class AppSettings
     public string? LastResource { get; set; }
     public List<string> LanInstruments { get; set; } = [];
     public BatteryInputs Battery { get; set; } = new();
+    /// <summary>Last inputs per power supply (key: serial number, or the resource string when it is unknown).</summary>
+    public Dictionary<string, BatteryInputs> SupplyInputs { get; set; } = [];
     /// <summary>Advanced overrides, only present when the user explicitly saved them. Keyed by option id.</summary>
     public Dictionary<string, double>? AdvancedOverrides { get; set; }
     public double PollIntervalSeconds { get; set; } = 1.0;
@@ -49,6 +53,7 @@ public sealed class AppSettings
         if (Theme is not ("Light" or "Dark")) Theme = "System";
         LanInstruments = (LanInstruments ?? []).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         Battery ??= new BatteryInputs();
+        SupplyInputs = SupplyInputs is null ? [] : SupplyInputs.Where(kv => kv.Value is not null).ToDictionary(kv => kv.Key, kv => kv.Value);
         if (!(Battery.NominalVoltage > 0)) Battery.NominalVoltage = 3.6;
         if (!(Battery.CapacityAh > 0)) Battery.CapacityAh = 2.0;
         if (!Enum.IsDefined(Battery.Technology)) Battery.Technology = BatteryTechnology.LiIon;

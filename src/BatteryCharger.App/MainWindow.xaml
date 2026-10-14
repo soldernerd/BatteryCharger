@@ -6,11 +6,12 @@
                     PaneDisplayMode="Left"
                     IsBackButtonVisible="Collapsed"
                     IsSettingsVisible="True"
-                    OpenPaneLength="200"
+                    OpenPaneLength="240"
                     SelectionChanged="OnSelectionChanged"
                     AutomationProperties.Name="Main navigation">
         <NavigationView.MenuItems>
-            <NavigationViewItem x:Name="ChargerItem" Content="Charger" Tag="charger" AutomationProperties.Name="Charger">
+            <!-- The supported power supplies are added below this item at run time (one tab each). -->
+            <NavigationViewItem x:Name="ChargerItem" Content="Charger" Tag="charger" IsExpanded="True" AutomationProperties.Name="Charger">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE83E;"/>
                 </NavigationViewItem.Icon>
@@ -22,7 +23,8 @@
             </NavigationViewItem>
         </NavigationView.MenuItems>
         <Grid>
-            <Frame x:Name="ContentFrame"/>
+            <ContentControl x:Name="Host" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
             <StackPanel x:Name="BusyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
                 <ProgressRing x:Name="Busy" IsActive="True" Width="40" Height="40"/>
                 <TextBlock Text="Checking for VISA..." HorizontalAlignment="Center"/>

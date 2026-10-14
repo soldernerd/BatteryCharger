@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using BatteryCharger.App.Services;
 using BatteryCharger.Core.Instruments;
+using BatteryCharger.Instruments.Drivers;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Dispatching;
@@ -10,12 +11,12 @@ namespace BatteryCharger.App.ViewModels;
 /// <summary>Developer page: send raw SCPI to the connected supply and watch the traffic (hardware bring-up).</summary>
 public sealed partial class ScpiConsoleViewModel : ObservableObject
 {
-    private readonly InstrumentService _instruments;
+    private readonly SupplyRegistry _registry;
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
 
-    public ScpiConsoleViewModel(InstrumentService instruments, VisaService visa)
+    public ScpiConsoleViewModel(SupplyRegistry registry, VisaService visa)
     {
-        _instruments = instruments;
+        _registry = registry;
         visa.Traffic += line => _dispatcher.TryEnqueue(() => Append(line));
     }
 
@@ -39,10 +40,10 @@ public sealed partial class ScpiConsoleViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanSend))]
     private async Task SendAsync()
     {
-        var link = _instruments.Link;
+        var link = CurrentLink();
         if (link is null)
         {
-            Status = "Not connected to a real instrument. Connect on the Charger page first.";
+            Status = "Not connected to a real instrument. Open a power supply tab below Charger first.";
             return;
         }
         var cmd = Command.Trim();
@@ -59,12 +60,16 @@ public sealed partial class ScpiConsoleViewModel : ObservableObject
         }
     }
 
+    /// <summary>The link of the tab shown last, else of any connected supply.</summary>
+    private ScpiLink? CurrentLink() =>
+        _registry.Selected?.Link ?? _registry.Supplies.Select(s => s.Link).FirstOrDefault(l => l is not null);
+
     private bool CanSend() => !string.IsNullOrWhiteSpace(Command);
 
     [RelayCommand]
     private async Task ReadErrorsAsync()
     {
-        var link = _instruments.Link;
+        var link = CurrentLink();
         if (link is null) return;
         try { await link.QueryAsync("SYST:ERR?", CancellationToken.None); }
         catch (InstrumentException ex) { Status = ex.Message; }

@@ -40,11 +40,10 @@ public partial class App : Application
         s.AddSingleton<SettingsService>();
         s.AddSingleton<WindowContext>();
         s.AddSingleton<VisaService>();
-        s.AddSingleton<InstrumentService>();
         s.AddSingleton<DialogService>();
         s.AddSingleton<ThemeService>();
         s.AddSingleton<SleepInhibitor>();
-        s.AddSingleton<ChargerViewModel>();
+        s.AddSingleton<SupplyRegistry>();
         s.AddSingleton<ScpiConsoleViewModel>();
         s.AddTransient<SettingsViewModel>();
         return builder.Build().Services;

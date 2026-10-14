@@ -15,10 +15,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     private readonly SettingsService _settings;
     private readonly VisaService _visa;
     private readonly ThemeService _theme;
-    private readonly ChargerViewModel _charger;
+    private readonly SupplyRegistry _charger;
     private readonly WindowContext _window;
 
-    public SettingsViewModel(SettingsService settings, VisaService visa, ThemeService theme, ChargerViewModel charger, WindowContext window)
+    public SettingsViewModel(SettingsService settings, VisaService visa, ThemeService theme, SupplyRegistry charger, WindowContext window)
     {
         _settings = settings;
         _visa = visa;

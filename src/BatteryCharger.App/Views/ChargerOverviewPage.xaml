@@ -1,0 +1,40 @@
+<Page
+    x:Class="BatteryCharger.App.Views.ChargerOverviewPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:BatteryCharger.App.ViewModels"
+    xmlns:helpers="using:BatteryCharger.App.Helpers">
+
+    <ScrollViewer>
+        <StackPanel Padding="24,16,24,16" Spacing="12" MaxWidth="900" HorizontalAlignment="Left">
+            <TextBlock Text="Charger" Style="{StaticResource TitleTextBlockStyle}"/>
+            <TextBlock TextWrapping="Wrap"
+                       Text="Every supported power supply has its own tab below Charger. Tabs are independent: each one can charge a different battery at the same time."/>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Refresh" Command="{x:Bind Registry.RefreshCommand}"
+                        Visibility="{x:Bind helpers:Fn.NotVis(Registry.IsDiscovering), Mode=OneWay}"
+                        AutomationProperties.Name="Search for power supplies"/>
+                <Button Content="Cancel" Command="{x:Bind Registry.RefreshCancelCommand}"
+                        Visibility="{x:Bind helpers:Fn.Vis(Registry.IsDiscovering), Mode=OneWay}"
+                        AutomationProperties.Name="Cancel the search"/>
+                <Button Content="Add LAN instrument..." Command="{x:Bind Registry.AddLanCommand}"
+                        AutomationProperties.Name="Add LAN instrument"/>
+                <ProgressRing IsActive="{x:Bind Registry.IsDiscovering, Mode=OneWay}" Width="20" Height="20"
+                              Visibility="{x:Bind helpers:Fn.Vis(Registry.IsDiscovering), Mode=OneWay}"/>
+                <TextBlock VerticalAlignment="Center" Text="{x:Bind Registry.DiscoveryStatus, Mode=OneWay}"
+                           Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+            </StackPanel>
+
+            <TextBlock Text="Instruments found" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0"/>
+            <ItemsControl ItemsSource="{x:Bind Registry.Found, Mode=OneWay}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SupplyItem">
+                        <TextBlock Text="{x:Bind Display}" Opacity="{x:Bind Dim}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

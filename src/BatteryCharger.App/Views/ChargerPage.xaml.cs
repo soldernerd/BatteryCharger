@@ -1,32 +1,27 @@
 using BatteryCharger.App.ViewModels;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace BatteryCharger.App.Views;
 
+/// <summary>One tab: a single power supply. The shell keeps one page instance per supply, so a running charge keeps its chart.</summary>
 public sealed partial class ChargerPage : Page
 {
-    public ChargerViewModel ViewModel { get; }
+    public SupplyViewModel ViewModel { get; }
 
-    public ChargerPage()
+    public ChargerPage(SupplyViewModel viewModel)
     {
-        ViewModel = App.Services.GetRequiredService<ChargerViewModel>();
+        ViewModel = viewModel;
         InitializeComponent();
         Chart.Buffer = ViewModel.Chart;
-        Loaded += (_, _) =>
+        Loaded += async (_, _) =>
         {
             ViewModel.ChartInvalidated += OnChartInvalidated;
             Chart.Redraw();
-            ViewModel.DiscoverOnFirstShow();
+            await ViewModel.EnsureConnectedAsync();
         };
         Unloaded += (_, _) => ViewModel.ChartInvalidated -= OnChartInvalidated;
     }
 
     private void OnChartInvalidated(object? sender, EventArgs e) => Chart.Redraw();
-
-    private void OnPresetClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button { Tag: double volts }) ViewModel.ApplyVoltagePreset(volts);
-    }
 }
