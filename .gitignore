@@ -6,3 +6,6 @@
 publish/
 TestResults/
 *.log
+latest/
+latest.new/
+BatteryCharger-*-win-x64*

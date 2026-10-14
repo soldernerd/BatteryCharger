@@ -170,6 +170,7 @@ public sealed partial class ChargerViewModel : ObservableObject
                 results.Add(info);
                 _log.LogInformation("Discovery: {Display} (supported: {Supported})", info.Display, info.Supported);
                 DiscoveryStatus = $"Found {results.Count}: {info.Display}";
+                RebuildSupplyList(results);   // usable straight away, not only after the slow LAN check
             });
             await _instruments.DiscoverAsync(progress, ct);
             RebuildSupplyList(results);
