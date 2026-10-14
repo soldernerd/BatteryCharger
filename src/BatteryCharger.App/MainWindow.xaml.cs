@@ -35,6 +35,8 @@ public sealed partial class MainWindow : Window
         ctx.Hwnd = _hwnd;
 
         Title = $"BatteryCharger {AppVersion.Display}";
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "BatteryCharger.ico");
+        if (File.Exists(iconPath)) AppWindow.SetIcon(iconPath);
         SystemBackdrop = new Microsoft.UI.Xaml.Media.MicaBackdrop();
         var work = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
         AppWindow.Resize(new SizeInt32(Math.Min(Scale(1240), work.Width), Math.Min(Scale(860), work.Height)));

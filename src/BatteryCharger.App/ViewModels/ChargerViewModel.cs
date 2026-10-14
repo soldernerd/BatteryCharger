@@ -146,6 +146,16 @@ public sealed partial class ChargerViewModel : ObservableObject
     private static SupplyItem ToItem(VisaResourceInfo f) =>
         new(f.Supported ? f.Display : $"{f.Display}  [not a supported power supply]", f.Resource, f.Supported, false);
 
+    private bool _autoDiscovered;
+
+    /// <summary>Runs the first instrument search when the page opens, so the user does not have to press Refresh.</summary>
+    public void DiscoverOnFirstShow()
+    {
+        if (_autoDiscovered || !_visa.IsAvailable || IsConnected) return;
+        _autoDiscovered = true;
+        if (RefreshCommand.CanExecute(null)) RefreshCommand.Execute(null);
+    }
+
     [RelayCommand(IncludeCancelCommand = true)]
     private async Task RefreshAsync(CancellationToken ct)
     {
@@ -158,6 +168,7 @@ public sealed partial class ChargerViewModel : ObservableObject
             var progress = new Progress<VisaResourceInfo>(info =>
             {
                 results.Add(info);
+                _log.LogInformation("Discovery: {Display} (supported: {Supported})", info.Display, info.Supported);
                 DiscoveryStatus = $"Found {results.Count}: {info.Display}";
             });
             await _instruments.DiscoverAsync(progress, ct);

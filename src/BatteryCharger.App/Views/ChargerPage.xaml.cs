@@ -18,6 +18,7 @@ public sealed partial class ChargerPage : Page
         {
             ViewModel.ChartInvalidated += OnChartInvalidated;
             Chart.Redraw();
+            ViewModel.DiscoverOnFirstShow();
         };
         Unloaded += (_, _) => ViewModel.ChartInvalidated -= OnChartInvalidated;
     }

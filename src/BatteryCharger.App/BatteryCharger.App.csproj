@@ -7,6 +7,7 @@
     <RootNamespace>BatteryCharger.App</RootNamespace>
     <AssemblyName>BatteryCharger</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\BatteryCharger.ico</ApplicationIcon>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -29,6 +30,11 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
     <PackageReference Include="Serilog.Extensions.Logging" Version="8.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Window / taskbar icon, loaded at runtime by MainWindow. -->
+    <Content Include="Assets\BatteryCharger.ico" CopyToOutputDirectory="PreserveNewest" Link="Assets\BatteryCharger.ico" />
   </ItemGroup>
 
   <ItemGroup>
