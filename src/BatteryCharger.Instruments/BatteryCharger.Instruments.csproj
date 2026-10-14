@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Plain net8.0 (not -windows): VISA is reached through P/Invoke on visa64.dll, so the drivers can be unit-tested on any OS. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>BatteryCharger.Instruments</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BatteryCharger.Core\BatteryCharger.Core.csproj" />
+  </ItemGroup>
+</Project>
