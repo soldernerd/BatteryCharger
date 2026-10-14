@@ -143,10 +143,36 @@ jobs:
           Remove-Item $pfxPath -ErrorAction SilentlyContinue
           if ($code -ne 0) { exit $code }
 
-      - name: Create release zip
+      # Three assets: the full zip (manual download) plus a small app-only zip and a runtime zip whose name carries a content hash.
+      # BatteryCharger.cmd (update-and-run.ps1) re-downloads the large runtime zip only when that hash changes.
+      - name: Create release zips
         if: steps.exists.outputs.RELEASE == 'true'
         shell: pwsh
-        run: Compress-Archive -Path "publish\*" -DestinationPath "BatteryCharger-${{ needs.build-test.outputs.version }}-win-x64.zip"
+        run: |
+          $v = '${{ needs.build-test.outputs.version }}'
+          $pub = (Resolve-Path publish).Path
+          Compress-Archive -Path "publish\*" -DestinationPath "BatteryCharger-$v-win-x64.zip"
+
+          $files = Get-ChildItem $pub -Recurse -File | ForEach-Object { [pscustomobject]@{ Full = $_.FullName; Rel = $_.FullName.Substring($pub.Length + 1) } }
+          $isApp = { param($rel) $rel -like 'BatteryCharger.*' -or $rel -like 'Views\*' -or $rel -like 'Assets\*' }
+          $app = @($files | Where-Object { & $isApp $_.Rel })
+          $rt  = @($files | Where-Object { -not (& $isApp $_.Rel) })
+
+          $lines = $rt | Sort-Object Rel | ForEach-Object { "$($_.Rel)|$((Get-FileHash $_.Full -Algorithm SHA256).Hash)" }
+          $bytes = [Text.Encoding]::UTF8.GetBytes(($lines -join "`n"))
+          $hash = ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes)) -replace '-', '').Substring(0, 12).ToLower()
+
+          foreach ($set in @(@{ Name = 'app'; Files = $app; Zip = "BatteryCharger-app-$v-win-x64.zip" },
+                             @{ Name = 'runtime'; Files = $rt; Zip = "BatteryCharger-runtime-$hash-win-x64.zip" })) {
+            $stage = "stage-$($set.Name)"
+            foreach ($f in $set.Files) {
+              $dest = Join-Path $stage $f.Rel
+              New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+              Copy-Item $f.Full $dest
+            }
+            Compress-Archive -Path "$stage\*" -DestinationPath $set.Zip
+          }
+          Get-ChildItem *.zip | ForEach-Object { "{0,8:N1} MB  {1}" -f ($_.Length / 1MB), $_.Name }
 
       - name: Create GitHub release
         if: steps.exists.outputs.RELEASE == 'true'
@@ -154,7 +180,10 @@ jobs:
         with:
           tag_name: ${{ needs.build-test.outputs.tag }}
           name: BatteryCharger ${{ needs.build-test.outputs.tag }}
-          files: BatteryCharger-${{ needs.build-test.outputs.version }}-win-x64.zip
+          files: |
+            BatteryCharger-${{ needs.build-test.outputs.version }}-win-x64.zip
+            BatteryCharger-app-${{ needs.build-test.outputs.version }}-win-x64.zip
+            BatteryCharger-runtime-*-win-x64.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

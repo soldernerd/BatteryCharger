@@ -47,6 +47,28 @@
     WinUI 3 unpackaged apps. This target copies them from the build output after
     publish so the app can load its UI when run from the publish folder.
   -->
+  <!--
+    Size trimming of the published folder (it is downloaded on every update). The self-contained Windows App SDK ships
+    on-device AI / ML components (onnxruntime, DirectML, Windows.AI.*), widgets and debugger helpers that this app never
+    loads, plus UI resources for ~90 languages. Only English and German are kept. WinUIEdit.dll must stay (text boxes).
+    Runs after the copy target below so nothing is re-added.
+  -->
+  <Target Name="TrimPublishOutput" AfterTargets="CopyWinUIAssetsToPublish">
+    <ItemGroup>
+      <_Trim Include="$(PublishDir)onnxruntime*.dll;$(PublishDir)DirectML.dll;$(PublishDir)Microsoft.ML.OnnxRuntime.dll" />
+      <_Trim Include="$(PublishDir)Microsoft.Windows.AI.*;$(PublishDir)Microsoft.Windows.Workloads*" />
+      <_Trim Include="$(PublishDir)Microsoft.Windows.Widgets*;$(PublishDir)Microsoft.Windows.Vision*" />
+      <_Trim Include="$(PublishDir)Microsoft.Windows.Internal.Vision*;$(PublishDir)Microsoft.Windows.SemanticSearch*" />
+      <_Trim Include="$(PublishDir)mscordaccore*.dll;$(PublishDir)mscordbi.dll" />
+      <_Trim Include="$(PublishDir)NpuDetect\**" />
+      <_PublishDir Include="$([System.IO.Directory]::GetDirectories('$(PublishDir)'))" />
+      <_LocaleDir Include="@(_PublishDir)"
+                  Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)', '^[a-z]{2,3}(-[A-Za-z]+){1,2}$')) And '%(Filename)' != 'en-us' And '%(Filename)' != 'en-US' And '%(Filename)' != 'de-DE'" />
+    </ItemGroup>
+    <Delete Files="@(_Trim)" />
+    <RemoveDir Directories="@(_LocaleDir);$(PublishDir)NpuDetect" />
+  </Target>
+
   <Target Name="CopyWinUIAssetsToPublish" AfterTargets="Publish">
     <ItemGroup>
       <_AppXbfFiles Include="$(OutDir)**\*.xbf" />
