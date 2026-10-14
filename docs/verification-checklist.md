@@ -28,7 +28,7 @@ Record the outcome next to each item (model, firmware, exact syntax that worked)
 | # | Item | Notes | Result |
 |---|---|---|---|
 | 12 | `*IDN?` returns the model in field 2; older units answer `HEWLETT-PACKARD,...` | `InstrumentIdentity.Parse`, `SupportedModels` | |
-| 13 | Does `MEAS:VOLT?` report the battery voltage with the output **off**? | Preflight relies on it. If it reads 0 V the preflight refuses ("battery missing"). Fallback: briefly enable the output at minimum current limit, or let the user confirm the voltage. | |
+| 13 | Does `MEAS:VOLT?` report the battery voltage with the output **off**? | Preflight relies on it. If it reads 0 V the preflight refuses ("battery missing"). Fallback: briefly enable the output at minimum current limit, or let the user confirm the voltage. E36103A reads 0 V with the output off (seen in the first hardware test), so the preflight now probes with the output briefly on at 80 % of the refuse threshold, 50 mA, OVP armed (`PreflightChecker.ProbeAsync`). Check the probe leaves the battery undisturbed (no discharge through the supply) and that a deeply discharged cell can be started via "Try charging anyway". | |
 | 14 | Resolution/accuracy of `MEAS:CURR?` at low currents | Decides the 10 mA termination floor (`ProfileOptions.TerminationCurrentFloorAmps`). | |
 | 15 | CC mode no longer trips the output after OCP is disabled | Run a CC stage into a real cell/load and watch for an unexpected output-off fault. | |
 | 16 | USB-TMC, LAN VXI-11 (`inst0`) and raw socket (5025) through the installed VISA on a clean Windows install | `NativeVisaTransport` sets `\n` termination for reads and writes; check sockets in particular. | |

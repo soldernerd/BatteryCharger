@@ -148,7 +148,7 @@ public sealed class ChargeSession : IAsyncDisposable
         _logPath = _logger.FilePath;
 
         _outputTouched = true;
-        var pre = await PreflightChecker.RunAsync(_channel, _profile, ct);
+        var pre = await PreflightChecker.RunAsync(_channel, _profile, ct, _options.AllowLowVoltageStart);
         _snapshot = pre.Snapshot;
         if (pre.Snapshot is { OutputOn: true })
             await LogEventAsync("Output was on before the session; it was switched off", ct);

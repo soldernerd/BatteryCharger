@@ -37,6 +37,28 @@ public sealed class ChargeProfile
         }
     }
 
+    /// <summary>
+    /// For a battery below the refuse threshold that the user chose to try anyway: the same profile, but guaranteed to start
+    /// with a gentle pre-charge (added for chemistries that have none, e.g. NiMH) that must lift the pack before the normal stages.
+    /// </summary>
+    public ChargeProfile WithRecoveryStage()
+    {
+        if (!IsValid || Stages.Any(s => s is PrechargeStage)) return this;
+        var chem = CellChemistryInfo.For(Battery.Technology);
+        var cells = Battery.CellsInSeries;
+        var exit = 0.8 * chem.CellNominalV * cells;
+        var amps = Math.Min(Options.PrechargeRateC * Battery.CapacityAh, MainCurrentAmps);
+        var stage = new PrechargeStage(Stages[0].Volts, amps, exit, Options.PrechargeTimeout, 0.8 * chem.CellNominalV);
+        return new ChargeProfile
+        {
+            Battery = Battery, Options = Options, Stages = [stage, .. Stages],
+            TargetPackVolts = TargetPackVolts, OvpVolts = OvpVolts, OvpMarginPackVolts = OvpMarginPackVolts,
+            MainCurrentAmps = MainCurrentAmps, TerminationAmps = TerminationAmps, MaxChargeAh = MaxChargeAh,
+            RefuseBelowPackVolts = RefuseBelowPackVolts, PrechargeBelowPackVolts = exit,
+            Warnings = Warnings, Errors = Errors,
+        };
+    }
+
     /// <summary>Picks the stage to start with given the measured battery voltage (skips pre-charge / CC as appropriate).</summary>
     public int InitialStageIndex(double batteryVolts)
     {

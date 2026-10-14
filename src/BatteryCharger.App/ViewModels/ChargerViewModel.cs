@@ -532,6 +532,17 @@ public sealed partial class ChargerViewModel : ObservableObject
 
             BusyText = "Running preflight checks...";
             var pre = await PreflightChecker.RunAsync(channel, profile, CancellationToken.None);
+            var lowVoltageStart = false;
+            if (pre is { Refused: true, LowVoltageOverridable: true } && await _dialogs.ConfirmAsync("Battery voltage very low",
+                    pre.Refusal + "\n\nThe battery may only be deeply discharged. You can try a gentle pre-charge at a low current; "
+                    + "it is stopped automatically if the voltage does not recover. Only do this if you know the battery is intact.",
+                    "Try charging anyway", "Cancel"))
+            {
+                profile = profile.WithRecoveryStage();
+                Profile = profile;
+                pre = PreflightChecker.Evaluate(profile, pre.BatteryVolts, pre.Snapshot, allowLowVoltage: true);
+                lowVoltageStart = true;
+            }
             if (pre.Refused)
             {
                 await _dialogs.ShowMessageAsync("Charging refused", pre.Refusal + (pre.Hints.Count > 0 ? "\n\n" + string.Join("\n", pre.Hints) : ""));
@@ -542,7 +553,7 @@ public sealed partial class ChargerViewModel : ObservableObject
             if (!await _dialogs.ConfirmChargeAsync(profile, pre, supplyText, channel.OutputWarning)) return;
 
             PersistInputs();
-            StartSession(channel, profile);
+            StartSession(channel, profile, lowVoltageStart);
         }
         catch (Exception ex)
         {
@@ -555,7 +566,7 @@ public sealed partial class ChargerViewModel : ObservableObject
         }
     }
 
-    private void StartSession(IPowerSupplyChannel channel, ChargeProfile profile)
+    private void StartSession(IPowerSupplyChannel channel, ChargeProfile profile, bool allowLowVoltageStart)
     {
         var psu = _instruments.Current!;
         var simulated = psu is FakePowerSupply;
@@ -567,6 +578,7 @@ public sealed partial class ChargerViewModel : ObservableObject
             PollInterval = TimeSpan.FromSeconds(s.PollIntervalSeconds),
             RestorePreviousSetpoints = s.RestorePreviousSetpoints,
             UserConfirmed = true,
+            AllowLowVoltageStart = allowLowVoltageStart,
             Instrument = new InstrumentInfo(psu.Identity.ToString(), psu.Resource, channel.DisplayName),
             Clock = clock,
         });

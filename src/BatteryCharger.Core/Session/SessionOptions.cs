@@ -12,6 +12,8 @@ public sealed class SessionOptions
     public bool RestorePreviousSetpoints { get; init; } = true;
     /// <summary>Must be true: the user confirmed polarity, chemistry, cell count and supervision (spec 6.4 step 7).</summary>
     public bool UserConfirmed { get; init; }
+    /// <summary>The user chose to try a battery below the refuse threshold; the profile must start with a pre-charge.</summary>
+    public bool AllowLowVoltageStart { get; init; }
     public InstrumentInfo Instrument { get; init; } = new("", "", "");
     public ISessionClock Clock { get; init; } = new StopwatchClock();
     /// <summary>Log interval while floating.</summary>
