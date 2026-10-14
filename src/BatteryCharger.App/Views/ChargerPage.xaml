@@ -1,0 +1,409 @@
+<Page
+    x:Class="BatteryCharger.App.Views.ChargerPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:BatteryCharger.App.ViewModels"
+    xmlns:helpers="using:BatteryCharger.App.Helpers"
+    xmlns:controls="using:BatteryCharger.App.Controls"
+    NavigationCacheMode="Required">
+
+    <Page.Resources>
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="16"/>
+        </Style>
+        <Style x:Key="ReadoutValue" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="28"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="ReadoutCaption" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}"/>
+        </Style>
+        <SolidColorBrush x:Key="WarningText" Color="#C85A00"/>
+        <SolidColorBrush x:Key="ErrorText" Color="#C42B1C"/>
+    </Page.Resources>
+
+    <Grid Padding="24,16,24,16" RowSpacing="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <InfoBar Grid.Row="0"
+                 IsOpen="{x:Bind ViewModel.IsBannerOpen, Mode=TwoWay}"
+                 Severity="{x:Bind ViewModel.BannerSeverity, Mode=OneWay}"
+                 Message="{x:Bind ViewModel.BannerMessage, Mode=OneWay}"
+                 IsClosable="True"
+                 AutomationProperties.Name="Status message"/>
+
+        <!-- ===================== Setup (idle) ===================== -->
+        <Grid Grid.Row="1" ColumnSpacing="16"
+              Visibility="{x:Bind helpers:Fn.Vis(ViewModel.ShowSetup), Mode=OneWay}"
+              x:Name="SetupGrid">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*"/>
+                <ColumnDefinition Width="2*" MinWidth="340"/>
+            </Grid.ColumnDefinitions>
+
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="12" Padding="0,0,12,0">
+
+                    <!-- Power supply -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Power supply" Style="{StaticResource SubtitleTextBlockStyle}"/>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox Grid.Column="0" HorizontalAlignment="Stretch"
+                                          Header="Instrument"
+                                          ItemsSource="{x:Bind ViewModel.Supplies, Mode=OneWay}"
+                                          SelectedItem="{x:Bind ViewModel.SelectedSupply, Mode=TwoWay}"
+                                          IsEnabled="{x:Bind ViewModel.CanChangeSupply, Mode=OneWay}"
+                                          PlaceholderText="No instrument selected"
+                                          AutomationProperties.Name="Power supply">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:SupplyItem">
+                                            <TextBlock Text="{x:Bind Display}" Opacity="{x:Bind Dim}" TextTrimming="CharacterEllipsis"/>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button Grid.Column="1" VerticalAlignment="Bottom" Content="Refresh"
+                                        Command="{x:Bind ViewModel.RefreshCommand}"
+                                        Visibility="{x:Bind helpers:Fn.NotVis(ViewModel.IsDiscovering), Mode=OneWay}"
+                                        IsEnabled="{x:Bind ViewModel.CanChangeSupply, Mode=OneWay}"
+                                        AutomationProperties.Name="Refresh instrument list"/>
+                                <Button Grid.Column="1" VerticalAlignment="Bottom" Content="Cancel"
+                                        Command="{x:Bind ViewModel.RefreshCancelCommand}"
+                                        Visibility="{x:Bind helpers:Fn.Vis(ViewModel.IsDiscovering), Mode=OneWay}"
+                                        AutomationProperties.Name="Cancel instrument search"/>
+                                <Button Grid.Column="2" VerticalAlignment="Bottom" Content="Add LAN instrument..."
+                                        Command="{x:Bind ViewModel.AddLanCommand}"
+                                        IsEnabled="{x:Bind ViewModel.CanChangeSupply, Mode=OneWay}"
+                                        AutomationProperties.Name="Add LAN instrument"/>
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <ProgressRing IsActive="{x:Bind ViewModel.IsDiscovering, Mode=OneWay}" Width="16" Height="16"
+                                              Visibility="{x:Bind helpers:Fn.Vis(ViewModel.IsDiscovering), Mode=OneWay}"/>
+                                <TextBlock Text="{x:Bind ViewModel.DiscoveryStatus, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Connect" Style="{StaticResource AccentButtonStyle}"
+                                        Command="{x:Bind ViewModel.ConnectCommand}"
+                                        AutomationProperties.Name="Connect to the selected power supply"/>
+                                <Button Content="Disconnect" Command="{x:Bind ViewModel.DisconnectCommand}"
+                                        AutomationProperties.Name="Disconnect from the power supply"/>
+                                <ProgressRing IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" Width="20" Height="20"
+                                              Visibility="{x:Bind helpers:Fn.Vis(ViewModel.IsBusy), Mode=OneWay}"/>
+                                <TextBlock VerticalAlignment="Center" Text="{x:Bind ViewModel.BusyText, Mode=OneWay}"
+                                           Visibility="{x:Bind helpers:Fn.Vis(ViewModel.IsBusy), Mode=OneWay}"/>
+                            </StackPanel>
+                            <StackPanel Spacing="8" Visibility="{x:Bind helpers:Fn.Vis(ViewModel.IsConnected), Mode=OneWay}">
+                                <TextBlock Text="{x:Bind ViewModel.IdentityText, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                <ComboBox Header="Channel / output" HorizontalAlignment="Stretch"
+                                          ItemsSource="{x:Bind ViewModel.Channels, Mode=OneWay}"
+                                          SelectedItem="{x:Bind ViewModel.SelectedChannel, Mode=TwoWay}"
+                                          AutomationProperties.Name="Channel">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:ChannelItem">
+                                            <TextBlock Text="{x:Bind Name}"/>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <InfoBar IsOpen="True" IsClosable="False" Severity="Warning"
+                                         Message="{x:Bind ViewModel.OutputWarning, Mode=OneWay}"
+                                         Visibility="{x:Bind helpers:Fn.Vis(ViewModel.HasOutputWarning), Mode=OneWay}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Battery -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Battery" Style="{StaticResource SubtitleTextBlockStyle}"/>
+                            <ComboBox Header="Technology" HorizontalAlignment="Stretch"
+                                      ItemsSource="{x:Bind ViewModel.Technologies}"
+                                      DisplayMemberPath="DisplayName"
+                                      SelectedIndex="{x:Bind ViewModel.TechnologyIndex, Mode=TwoWay}"
+                                      AutomationProperties.Name="Battery technology"/>
+                            <StackPanel Spacing="4">
+                                <NumberBox Header="Nominal voltage (V)" Minimum="0.5" Maximum="100"
+                                           Value="{x:Bind ViewModel.NominalVoltage, Mode=TwoWay}"
+                                           SpinButtonPlacementMode="Compact" SmallChange="0.1" LargeChange="1"
+                                           AutomationProperties.Name="Nominal voltage in volts"/>
+                                <ItemsControl ItemsSource="{x:Bind ViewModel.VoltagePresets, Mode=OneWay}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="6"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="x:Double">
+                                            <Button Content="{x:Bind}" Tag="{x:Bind}" Click="OnPresetClick" Padding="10,2,10,2"
+                                                    AutomationProperties.Name="Voltage preset"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <NumberBox Grid.Column="0" Header="Capacity" Minimum="0"
+                                           Value="{x:Bind ViewModel.CapacityValue, Mode=TwoWay}"
+                                           SpinButtonPlacementMode="Compact" SmallChange="0.1" LargeChange="1"
+                                           AutomationProperties.Name="Battery capacity"/>
+                                <ToggleSwitch Grid.Column="1" Header="Unit" OnContent="mAh" OffContent="Ah"
+                                              IsOn="{x:Bind ViewModel.CapacityInMah, Mode=TwoWay}"
+                                              AutomationProperties.Name="Capacity unit"/>
+                            </Grid>
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Spacing="4">
+                                    <NumberBox Header="Cells in series" Minimum="1" Maximum="100"
+                                               Value="{x:Bind ViewModel.CellsValue, Mode=TwoWay}"
+                                               SpinButtonPlacementMode="Compact"
+                                               AutomationProperties.Name="Cells in series"/>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                   Text="derived from the voltage" Visibility="{x:Bind helpers:Fn.Vis(ViewModel.AutoCells), Mode=OneWay}"/>
+                                        <HyperlinkButton Content="Back to automatic" Padding="0" Command="{x:Bind ViewModel.ResetCellsCommand}"
+                                                         Visibility="{x:Bind helpers:Fn.NotVis(ViewModel.AutoCells), Mode=OneWay}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="4">
+                                    <NumberBox Header="Charge rate (C)" Minimum="0.01" Maximum="2"
+                                               Value="{x:Bind ViewModel.ChargeRateC, Mode=TwoWay}"
+                                               SpinButtonPlacementMode="Compact" SmallChange="0.05" LargeChange="0.1"
+                                               AutomationProperties.Name="Charge rate in C"/>
+                                    <TextBlock Text="{x:Bind ViewModel.RateHint, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <Expander Header="Advanced" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                      AutomationProperties.Name="Advanced profile options">
+                                <StackPanel Spacing="8">
+                                    <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="Values beyond the safety limits of the chemistry are rejected."/>
+                                    <ItemsControl ItemsSource="{x:Bind ViewModel.AdvancedFields, Mode=OneWay}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:OptionField">
+                                                <StackPanel Margin="0,0,0,8" Spacing="2">
+                                                    <Grid ColumnSpacing="8">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <NumberBox Grid.Column="0" Header="{x:Bind Header}"
+                                                                   Value="{x:Bind Value, Mode=TwoWay}"
+                                                                   SpinButtonPlacementMode="Compact" SmallChange="0.01" LargeChange="0.1"
+                                                                   AutomationProperties.Name="{x:Bind Header}"/>
+                                                        <Button Grid.Column="1" VerticalAlignment="Bottom" Content="Reset"
+                                                                Command="{x:Bind ResetCommand}"
+                                                                IsEnabled="{x:Bind helpers:Fn.Not(IsDefault), Mode=OneWay}"
+                                                                AutomationProperties.Name="Reset to default"/>
+                                                    </Grid>
+                                                    <TextBlock Text="{x:Bind Message, Mode=OneWay}" Foreground="{StaticResource ErrorText}"
+                                                               TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                                                               Visibility="{x:Bind helpers:Fn.Vis(HasMessage), Mode=OneWay}"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button Content="Reset all" Command="{x:Bind ViewModel.ResetAdvancedCommand}"/>
+                                        <Button Content="Save as defaults" Command="{x:Bind ViewModel.SaveAdvancedCommand}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Profile summary -->
+            <Grid Grid.Column="1" RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" Style="{StaticResource CardStyle}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Charge profile" Style="{StaticResource SubtitleTextBlockStyle}"/>
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.ProfileErrors, Mode=OneWay}"
+                                          Visibility="{x:Bind helpers:Fn.Vis(ViewModel.HasErrors), Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="x:String">
+                                        <TextBlock Text="{x:Bind}" TextWrapping="Wrap" Foreground="{StaticResource ErrorText}" Margin="0,0,0,4"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.ProfileWarnings, Mode=OneWay}"
+                                          Visibility="{x:Bind helpers:Fn.Vis(ViewModel.HasWarnings), Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="x:String">
+                                        <TextBlock Text="{x:Bind}" TextWrapping="Wrap" Foreground="{StaticResource WarningText}" Margin="0,0,0,4"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.ProfileLines, Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="x:String">
+                                        <TextBlock Text="{x:Bind}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+                <StackPanel Grid.Row="1" Spacing="8">
+                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="Connect a supply and enter valid battery data to enable charging. Charging is only safe under supervision."/>
+                    <Button Content="Start charging" Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Stretch"
+                            Padding="0,10,0,10" FontSize="16"
+                            Command="{x:Bind ViewModel.StartCommand}"
+                            AutomationProperties.Name="Start charging"/>
+                </StackPanel>
+            </Grid>
+        </Grid>
+
+        <!-- ===================== Charging / result ===================== -->
+        <Grid Grid.Row="1" RowSpacing="12" x:Name="ChargingGrid"
+              Visibility="{x:Bind helpers:Fn.Vis(ViewModel.ShowCharging), Mode=OneWay}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Header -->
+            <Grid Grid.Row="0" ColumnSpacing="24">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="State" Style="{StaticResource ReadoutCaption}"/>
+                    <TextBlock Text="{x:Bind ViewModel.StateText, Mode=OneWay}" Style="{StaticResource TitleTextBlockStyle}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Stage" Style="{StaticResource ReadoutCaption}"/>
+                    <TextBlock Text="{x:Bind ViewModel.StageText, Mode=OneWay}" Style="{StaticResource TitleTextBlockStyle}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Elapsed" Style="{StaticResource ReadoutCaption}"/>
+                    <TextBlock Text="{x:Bind ViewModel.ElapsedText, Mode=OneWay}" Style="{StaticResource TitleTextBlockStyle}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                    <TextBlock VerticalAlignment="Center" Text="{x:Bind ViewModel.LogFileName, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <HyperlinkButton Content="Open log folder" Command="{x:Bind ViewModel.OpenLogFolderCommand}"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Readouts -->
+            <Grid Grid.Row="1" ColumnSpacing="12" RowSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                    <StackPanel AutomationProperties.Name="Voltage">
+                        <TextBlock Text="Voltage" Style="{StaticResource ReadoutCaption}"/>
+                        <TextBlock Text="{x:Bind ViewModel.VoltageText, Mode=OneWay}" Style="{StaticResource ReadoutValue}"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Style="{StaticResource CardStyle}">
+                    <StackPanel AutomationProperties.Name="Current">
+                        <TextBlock Text="Current" Style="{StaticResource ReadoutCaption}"/>
+                        <TextBlock Text="{x:Bind ViewModel.CurrentText, Mode=OneWay}" Style="{StaticResource ReadoutValue}"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                    <StackPanel AutomationProperties.Name="Power">
+                        <TextBlock Text="Power" Style="{StaticResource ReadoutCaption}"/>
+                        <TextBlock Text="{x:Bind ViewModel.PowerText, Mode=OneWay}" Style="{StaticResource ReadoutValue}"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="3" Style="{StaticResource CardStyle}">
+                    <StackPanel AutomationProperties.Name="Supply mode">
+                        <TextBlock Text="Supply mode" Style="{StaticResource ReadoutCaption}"/>
+                        <TextBlock Text="{x:Bind ViewModel.ModeText, Mode=OneWay}" Style="{StaticResource ReadoutValue}"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource CardStyle}">
+                    <StackPanel AutomationProperties.Name="Charge delivered">
+                        <TextBlock Text="Charge" Style="{StaticResource ReadoutCaption}"/>
+                        <TextBlock Text="{x:Bind ViewModel.ChargeText, Mode=OneWay}" Style="{StaticResource ReadoutValue}"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource CardStyle}">
+                    <StackPanel AutomationProperties.Name="Energy">
+                        <TextBlock Text="Energy" Style="{StaticResource ReadoutCaption}"/>
+                        <TextBlock Text="{x:Bind ViewModel.EnergyText, Mode=OneWay}" Style="{StaticResource ReadoutValue}"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2" Style="{StaticResource CardStyle}">
+                    <StackPanel AutomationProperties.Name="Setpoints">
+                        <TextBlock Text="Setpoints (voltage / current limit)" Style="{StaticResource ReadoutCaption}"/>
+                        <TextBlock Text="{x:Bind ViewModel.SetpointText, Mode=OneWay}" Style="{StaticResource ReadoutValue}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Chart -->
+            <Border Grid.Row="2" Style="{StaticResource CardStyle}" Padding="8">
+                <controls:LiveChart x:Name="Chart"/>
+            </Border>
+
+            <!-- Stop / result -->
+            <Grid Grid.Row="3">
+                <Button HorizontalAlignment="Stretch" Content="STOP charging" FontSize="20" Padding="0,14,0,14"
+                        Background="#C42B1C" Foreground="White"
+                        Command="{x:Bind ViewModel.StopCommand}"
+                        Visibility="{x:Bind helpers:Fn.Vis(ViewModel.IsSessionActive), Mode=OneWay}"
+                        AutomationProperties.Name="Stop charging"/>
+                <Border Style="{StaticResource CardStyle}" Visibility="{x:Bind helpers:Fn.Vis(ViewModel.HasResult), Mode=OneWay}">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBlock Text="{x:Bind ViewModel.ResultTitle, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}"/>
+                            <TextBlock Text="{x:Bind ViewModel.ResultDetails, Mode=OneWay}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Button Content="Open log" Command="{x:Bind ViewModel.OpenLogCommand}"/>
+                            <Button Content="New charge" Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.NewChargeCommand}"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Page>

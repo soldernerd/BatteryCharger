@@ -9,6 +9,8 @@ public interface IPowerSupplyChannel
     string DisplayName { get; }
     /// <summary>Non-null when switching this output also affects other outputs of the instrument.</summary>
     string? OutputWarning { get; }
+    /// <summary>True when the model has selectable voltage ranges (changing the range resets setpoints, so it is only done at start).</summary>
+    bool HasVoltageRanges { get; }
     /// <summary>Returns the limits, selecting the smallest voltage range covering <paramref name="requiredVolts"/> if the model has ranges.</summary>
     Task<ChannelLimits> GetLimitsAsync(double requiredVolts, CancellationToken ct);
     Task<ChannelSnapshot> ReadStateAsync(CancellationToken ct);

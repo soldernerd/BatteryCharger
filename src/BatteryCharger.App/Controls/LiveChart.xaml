@@ -1,0 +1,12 @@
+<UserControl
+    x:Class="BatteryCharger.App.Controls.LiveChart"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    AutomationProperties.Name="Live voltage and current chart">
+    <Grid x:Name="Root" Background="Transparent" MinHeight="220">
+        <Canvas x:Name="Plot" />
+    </Grid>
+</UserControl>

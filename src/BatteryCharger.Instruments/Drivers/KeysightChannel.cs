@@ -21,6 +21,7 @@ public abstract class KeysightChannel : IPowerSupplyChannel
     protected ScpiLink Link { get; }
     public int Index { get; }
     public string? OutputWarning { get; protected set; }
+    public virtual bool HasVoltageRanges => false;
 
     /// <summary>Last known limits used by <see cref="DisplayName"/>; null until read.</summary>
     protected ChannelLimits? KnownLimits { get => _limits; set => _limits = value; }
@@ -30,6 +31,8 @@ public abstract class KeysightChannel : IPowerSupplyChannel
     protected abstract string Set(string header, string arg);
     /// <summary>Query for <paramref name="header"/> (without '?'), optional argument such as MAX.</summary>
     protected abstract string Get(string header, string? arg = null);
+    /// <summary>Command that clears a latched protection trip (OVP) so the output can be enabled again.</summary>
+    protected abstract string ProtectionClearCommand { get; }
     /// <summary>Selects this channel on instruments that need it; runs at the start of every exclusive sequence.</summary>
     protected virtual Task PrepareAsync(ScpiIo io) => Task.CompletedTask;
     /// <summary>Selects the smallest voltage range covering <paramref name="requiredVolts"/>. No-op without ranges.</summary>
@@ -99,6 +102,8 @@ public abstract class KeysightChannel : IPowerSupplyChannel
             await PrepareAsync(io);
             await io.WriteAsync(Set("OUTP", "OFF"));
             await io.WriteAsync("*CLS");
+            await io.WriteAsync(ProtectionClearCommand);                    // VERIFY
+            await DrainAsync(io);                                            // an unsupported clear command must not abort the start
             await SelectRangeAsync(io, sp.Volts);
             await io.WriteAsync(Set("VOLT", Num(sp.Volts)));
             await io.WriteAsync(Set("CURR", Num(sp.AmpsLimit)));

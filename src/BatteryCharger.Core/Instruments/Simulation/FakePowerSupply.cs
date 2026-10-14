@@ -16,7 +16,7 @@ public sealed class FakePowerSupply : IPowerSupply
     public FakePowerSupply(SimulatedBattery battery, SimulatedClock? clock = null, TimeSpan? stepPerMeasure = null,
                            double timeScale = 1.0, ChannelLimits? limits = null)
     {
-        Channel = new FakeChannel(battery, clock, stepPerMeasure, timeScale, limits ?? new ChannelLimits(30, 5, 0, 0.001));
+        Channel = new FakeChannel(battery, clock, stepPerMeasure, timeScale, limits ?? new ChannelLimits(60, 10, 0, 0.001));
         Channels = [Channel];
     }
 
@@ -41,6 +41,7 @@ public sealed class FakeChannel : IPowerSupplyChannel
     public int Index => 1;
     public string DisplayName => $"CH1 ({_limits.MaxVolts:0.#} V / {_limits.MaxAmps:0.#} A)";
     public string? OutputWarning => null;
+    public bool HasVoltageRanges => false;
 
     // Fault injection / inspection.
     public int MeasureCalls => _measureCount;

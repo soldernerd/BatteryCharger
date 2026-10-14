@@ -6,6 +6,8 @@ public sealed class E363xxChannel(ScpiLink link, int index, bool multiChannel) :
     protected override string Set(string header, string arg) =>
         multiChannel ? $"{header} {arg},(@{Index})" : $"{header} {arg}";
 
+    protected override string ProtectionClearCommand => multiChannel ? $"OUTP:PROT:CLE (@{Index})" : "OUTP:PROT:CLE";
+
     protected override string Get(string header, string? arg = null) =>
         (multiChannel, arg) switch
         {

@@ -6,6 +6,5 @@
     <Deterministic>true</Deterministic>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
-    <Version>0.1.0</Version>
   </PropertyGroup>
 </Project>

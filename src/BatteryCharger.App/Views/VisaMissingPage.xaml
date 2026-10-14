@@ -1,0 +1,15 @@
+<Page
+    x:Class="BatteryCharger.App.Views.VisaMissingPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <StackPanel Padding="48" Spacing="16" MaxWidth="720" HorizontalAlignment="Left" VerticalAlignment="Center">
+        <FontIcon Glyph="&#xE7BA;" FontSize="48" HorizontalAlignment="Left" Foreground="#C85A00"/>
+        <TextBlock Text="VISA is not available" Style="{StaticResource TitleTextBlockStyle}"/>
+        <TextBlock TextWrapping="Wrap" Text="BatteryCharger talks to the power supply through a VISA library. No working VISA library was found on this computer, so charging is disabled."/>
+        <TextBlock TextWrapping="Wrap" x:Name="ProblemText"/>
+        <TextBlock TextWrapping="Wrap" Text="Install the 64-bit Keysight IO Libraries Suite (recommended) or NI-VISA, then restart BatteryCharger."/>
+        <HyperlinkButton Content="Download Keysight IO Libraries Suite" Padding="0"
+                         NavigateUri="https://www.keysight.com/find/iosuite"/>
+    </StackPanel>
+</Page>

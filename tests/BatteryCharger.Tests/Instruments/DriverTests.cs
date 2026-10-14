@@ -112,6 +112,7 @@ public class DriverTests
         Assert.True(idx("CURR 1") < idx("VOLT:PROT 4.5"));
         Assert.True(idx("VOLT:PROT 4.5") < idx("VOLT:PROT:STAT ON"));
         Assert.Contains("CURR:PROT:STAT OFF", t.Sent);
+        Assert.True(idx("OUTP OFF") < idx("OUTP:PROT:CLE"));       // a latched trip is cleared before the new setpoints
         Assert.DoesNotContain("OUTP ON", t.Sent);          // configure never enables the output
         Assert.DoesNotContain("*RST", t.Sent);
         Assert.Contains("SYST:ERR?", t.Sent);
@@ -122,7 +123,7 @@ public class DriverTests
     {
         var t = new ScriptedTransport();
         await using var psu = await Connect(t, "Keysight Technologies,E36103A,SN,1.0");
-        t.ErrorQueue.Enqueue("-222,\"Data out of range\"");
+        t.OnWrite = c => { if (c == "CURR 1") t.ErrorQueue.Enqueue("-222,\"Data out of range\""); };   // error raised by a setpoint, after the protection clear
         var ex = await Assert.ThrowsAsync<InstrumentException>(() => psu.Channels[0].ConfigureAsync(new ChargeSetpoint(4.2, 1, 4.5), default));
         Assert.Contains("Data out of range", ex.Message);
     }

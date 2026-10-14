@@ -1,0 +1,72 @@
+<Page
+    x:Class="BatteryCharger.App.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer>
+        <StackPanel Padding="32,24,32,24" Spacing="16" MaxWidth="760" HorizontalAlignment="Left">
+            <TextBlock Text="Settings" Style="{StaticResource TitleTextBlockStyle}"/>
+
+            <NumberBox Header="Poll interval (seconds, 0.5 to 10)" Minimum="0.5" Maximum="10" Width="260" HorizontalAlignment="Left"
+                       SpinButtonPlacementMode="Compact" SmallChange="0.5"
+                       Value="{x:Bind ViewModel.PollIntervalSeconds, Mode=TwoWay}"
+                       AutomationProperties.Name="Poll interval in seconds"/>
+
+            <ComboBox Header="CSV separator" Width="260"
+                      SelectedIndex="{x:Bind ViewModel.CsvSeparatorIndex, Mode=TwoWay}"
+                      AutomationProperties.Name="CSV separator">
+                <ComboBoxItem Content="Comma (,)"/>
+                <ComboBoxItem Content="Semicolon (;) for German/Swiss Excel"/>
+            </ComboBox>
+
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Header="Log folder" Text="{x:Bind ViewModel.LogFolder, Mode=TwoWay}" AutomationProperties.Name="Log folder"/>
+                <Button Grid.Column="1" VerticalAlignment="Bottom" Content="Browse..." Command="{x:Bind ViewModel.BrowseLogFolderCommand}"/>
+            </Grid>
+
+            <ToggleSwitch Header="Restore previous supply setpoints after charging (output stays off)"
+                          IsOn="{x:Bind ViewModel.RestorePreviousSetpoints, Mode=TwoWay}"/>
+            <ToggleSwitch Header="Log SCPI traffic to the diagnostics log"
+                          IsOn="{x:Bind ViewModel.LogScpiTraffic, Mode=TwoWay}"/>
+            <NumberBox Header="VISA timeout (ms)" Minimum="500" Maximum="60000" Width="260" HorizontalAlignment="Left"
+                       SpinButtonPlacementMode="Compact" SmallChange="500" LargeChange="1000"
+                       Value="{x:Bind ViewModel.VisaTimeoutMs, Mode=TwoWay}"
+                       AutomationProperties.Name="VISA timeout in milliseconds"/>
+            <ComboBox Header="Theme" Width="260" SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}" AutomationProperties.Name="Theme">
+                <ComboBoxItem Content="Follow system"/>
+                <ComboBoxItem Content="Light"/>
+                <ComboBoxItem Content="Dark"/>
+            </ComboBox>
+            <ToggleSwitch Header="Developer mode (SCPI console and simulated power supply)"
+                          IsOn="{x:Bind ViewModel.DeveloperMode, Mode=TwoWay}"/>
+
+            <TextBlock Text="Saved LAN instruments" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+            <ItemsControl ItemsSource="{x:Bind ViewModel.LanInstruments}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                        <Grid ColumnSpacing="8" Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{x:Bind}" VerticalAlignment="Center" IsTextSelectionEnabled="True"/>
+                            <Button Grid.Column="1" Content="Remove" Click="OnRemoveClick" Tag="{x:Bind}" AutomationProperties.Name="Remove saved instrument"/>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="No saved LAN instruments." Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" x:Name="NoLanText"/>
+
+            <TextBlock Text="About" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0"/>
+            <TextBlock Text="{x:Bind ViewModel.VersionText}"/>
+            <TextBlock Text="{x:Bind ViewModel.VisaText}" TextWrapping="Wrap"/>
+            <TextBlock IsTextSelectionEnabled="True" TextWrapping="Wrap" Text="{x:Bind ViewModel.SettingsPath}"/>
+            <TextBlock IsTextSelectionEnabled="True" TextWrapping="Wrap" Text="{x:Bind ViewModel.DiagnosticsPath}"/>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

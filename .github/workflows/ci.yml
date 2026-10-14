@@ -1,0 +1,160 @@
+name: CI/CD
+
+# Pull requests and pushes: build + test.
+# Pushes to master additionally publish a self-contained win-x64 build and, when the version in
+# src/BatteryCharger.Core/AppVersion.cs has no release yet, create a GitHub release with it.
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  SOLUTION: BatteryCharger.sln
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+      tag: ${{ steps.version.outputs.TAG }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore ${{ env.SOLUTION }}
+
+      - name: Build (Release)
+        run: dotnet build ${{ env.SOLUTION }} --configuration Release --no-restore
+
+      - name: Unit tests
+        run: >
+          dotnet test tests/BatteryCharger.Tests/BatteryCharger.Tests.csproj
+          --configuration Release --no-build --verbosity normal
+          --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $content = Get-Content src/BatteryCharger.Core/AppVersion.cs -Raw
+          $major = [regex]::Match($content, 'Major\s*=\s*(\d+)').Groups[1].Value
+          $minor = [regex]::Match($content, 'Minor\s*=\s*(\d+)').Groups[1].Value
+          $patch = [regex]::Match($content, 'Patch\s*=\s*(\d+)').Groups[1].Value
+          $version = "$major.$minor.$patch"
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          echo "TAG=v$version" >> $env:GITHUB_OUTPUT
+
+  release:
+    name: Publish and release
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whether this version is already released
+        id: exists
+        shell: pwsh
+        run: |
+          $tag = '${{ needs.build-test.outputs.tag }}'
+          git fetch --tags --quiet
+          if (git tag --list $tag) {
+            Write-Host "Tag $tag already exists - skipping the release. Bump AppVersion.cs to publish a new one."
+            echo "RELEASE=false" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "RELEASE=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Setup .NET
+        if: steps.exists.outputs.RELEASE == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish (self-contained, win-x64)
+        if: steps.exists.outputs.RELEASE == 'true'
+        shell: pwsh
+        run: >
+          dotnet publish src/BatteryCharger.App/BatteryCharger.App.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:Platform=x64
+          --output publish
+
+      - name: Check the published output
+        if: steps.exists.outputs.RELEASE == 'true'
+        shell: pwsh
+        run: |
+          foreach ($f in 'BatteryCharger.exe', 'BatteryCharger.pri', 'App.xbf', 'MainWindow.xbf') {
+            if (-not (Test-Path "publish\$f")) { throw "Published output is missing $f" }
+          }
+
+      - name: Sign executable
+        if: steps.exists.outputs.RELEASE == 'true'
+        shell: pwsh
+        env:
+          CODE_SIGN_CERT: ${{ secrets.CODE_SIGN_CERT }}
+          CODE_SIGN_PASSWORD: ${{ secrets.CODE_SIGN_PASSWORD }}
+        run: |
+          if (-not $env:CODE_SIGN_CERT) {
+            Write-Host "CODE_SIGN_CERT secret not configured - skipping signing"
+            exit 0
+          }
+          $pfx = [Convert]::FromBase64String($env:CODE_SIGN_CERT)
+          $pfxPath = "$env:TEMP\codesign.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, $pfx)
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" |
+            Where-Object { $_.FullName -like "*x64*" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          & $signtool sign /f $pfxPath /p $env:CODE_SIGN_PASSWORD /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com "publish\BatteryCharger.exe"
+          $code = $LASTEXITCODE
+          Remove-Item $pfxPath -ErrorAction SilentlyContinue
+          if ($code -ne 0) { exit $code }
+
+      - name: Create release zip
+        if: steps.exists.outputs.RELEASE == 'true'
+        shell: pwsh
+        run: Compress-Archive -Path "publish\*" -DestinationPath "BatteryCharger-${{ needs.build-test.outputs.version }}-win-x64.zip"
+
+      - name: Create GitHub release
+        if: steps.exists.outputs.RELEASE == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build-test.outputs.tag }}
+          name: BatteryCharger ${{ needs.build-test.outputs.tag }}
+          files: BatteryCharger-${{ needs.build-test.outputs.version }}-win-x64.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

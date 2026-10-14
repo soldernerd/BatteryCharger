@@ -13,6 +13,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BatteryCharger.Tests", "tests\BatteryCharger.Tests\BatteryCharger.Tests.csproj", "{0C8BFFD3-4D71-4971-9894-8DCE870696F8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BatteryCharger.App", "src\BatteryCharger.App\BatteryCharger.App.csproj", "{8AB761C5-546B-4732-9E19-AFFE9786D171}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -59,6 +61,18 @@ Global
 		{0C8BFFD3-4D71-4971-9894-8DCE870696F8}.Release|x64.Build.0 = Release|Any CPU
 		{0C8BFFD3-4D71-4971-9894-8DCE870696F8}.Release|x86.ActiveCfg = Release|Any CPU
 		{0C8BFFD3-4D71-4971-9894-8DCE870696F8}.Release|x86.Build.0 = Release|Any CPU
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Debug|Any CPU.Build.0 = Debug|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Debug|x64.ActiveCfg = Debug|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Debug|x64.Build.0 = Debug|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Debug|x86.ActiveCfg = Debug|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Debug|x86.Build.0 = Debug|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Release|Any CPU.ActiveCfg = Release|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Release|Any CPU.Build.0 = Release|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Release|x64.ActiveCfg = Release|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Release|x64.Build.0 = Release|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Release|x86.ActiveCfg = Release|x64
+		{8AB761C5-546B-4732-9E19-AFFE9786D171}.Release|x86.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -67,5 +81,6 @@ Global
 		{EFB1DD8E-196C-456D-81E3-EFF244706A52} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{7DE17047-1059-48E6-87C0-BDE227718A1A} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{0C8BFFD3-4D71-4971-9894-8DCE870696F8} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{8AB761C5-546B-4732-9E19-AFFE9786D171} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

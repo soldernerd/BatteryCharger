@@ -17,7 +17,11 @@ public sealed class E364xAChannel : KeysightChannel
         if (dual) OutputWarning = "On this dual-output supply the output switch may energise both outputs. Check the settings of the other output before charging.";
     }
 
+    public override bool HasVoltageRanges => _ranges.Count > 0;
+
     protected override string Set(string header, string arg) => $"{header} {arg}";
+
+    protected override string ProtectionClearCommand => "OUTP:PROT:CLE";
 
     protected override string Get(string header, string? arg = null) =>
         arg is null ? $"{header}?" : $"{header}? {arg}";
