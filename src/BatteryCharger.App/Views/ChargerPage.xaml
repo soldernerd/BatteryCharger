@@ -43,8 +43,8 @@
               Visibility="{x:Bind helpers:Fn.Vis(ViewModel.ShowSetup), Mode=OneWay}"
               x:Name="SetupGrid">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="3*"/>
-                <ColumnDefinition Width="2*" MinWidth="340"/>
+                <ColumnDefinition Width="3*" MinWidth="360"/>
+                <ColumnDefinition Width="2*" MinWidth="260"/>
             </Grid.ColumnDefinitions>
 
             <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">

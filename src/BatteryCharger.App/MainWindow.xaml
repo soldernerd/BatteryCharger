@@ -6,7 +6,7 @@
                     PaneDisplayMode="Left"
                     IsBackButtonVisible="Collapsed"
                     IsSettingsVisible="True"
-                    OpenPaneLength="240"
+                    OpenPaneLength="220"
                     SelectionChanged="OnSelectionChanged"
                     AutomationProperties.Name="Main navigation">
         <NavigationView.MenuItems>
