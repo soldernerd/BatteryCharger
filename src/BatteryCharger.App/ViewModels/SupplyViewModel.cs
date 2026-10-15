@@ -89,8 +89,8 @@ public sealed partial class SupplyViewModel : ObservableObject
 
     public ObservableCollection<ChannelItem> Channels { get; } = [];
     [ObservableProperty] private ChannelItem? _selectedChannel;
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanEditInputs))] private bool _isConnected;
-    [ObservableProperty] private bool _isBusy;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanEditInputs), nameof(CanMeasureNow))] private bool _isConnected;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanMeasureNow))] private bool _isBusy;
     [ObservableProperty] private string _busyText = "";
     [ObservableProperty] private string? _outputWarning;
     public bool HasMultipleChannels => Channels.Count > 1;
@@ -122,6 +122,7 @@ public sealed partial class SupplyViewModel : ObservableObject
             OnPropertyChanged(nameof(HasMultipleChannels));
             IsConnected = true;
             SelectedChannel = Channels.FirstOrDefault();
+            _ = MeasureVoltageAsync();
         }
         catch (Exception ex)
         {
@@ -246,12 +247,14 @@ public sealed partial class SupplyViewModel : ObservableObject
         OnPropertyChanged(nameof(HasTechnology));
         OnPropertyChanged(nameof(Technology));
         OnPropertyChanged(nameof(Chemistry));
+        OnPropertyChanged(nameof(CanMeasureNow));
         if (_loading) return;
         _currentTouched = false;
         UpdateCellOptions(keepSelection: false);
         RebuildAdvancedFields(loadSaved: true);
         UpdateCurrentRange();
         Recompute();
+        _ = MeasureVoltageAsync();
     }
 
     partial void OnSelectedCellChanged(CellOption? value)
@@ -259,6 +262,7 @@ public sealed partial class SupplyViewModel : ObservableObject
         if (_loading) return;
         OnPropertyChanged(nameof(Cells));
         Recompute();
+        _ = MeasureVoltageAsync();
     }
 
     partial void OnCapacityValueChanged(double value)
@@ -491,12 +495,78 @@ public sealed partial class SupplyViewModel : ObservableObject
 
     private void ClearBanner() => IsBannerOpen = false;
 
+    // ---------------------------------------------------------------- battery voltage (idle display)
+
+    [ObservableProperty] private string _batteryVoltageText = "not measured yet";
+    [ObservableProperty] private string _batteryVoltageStamp = "";
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanMeasureNow))] private bool _isMeasuring;
+    private bool _measureAgain;
+    private DispatcherQueueTimer? _measureTimer;
+
+    /// <summary>The supply is connected, a technology is chosen and nothing else is using the output.</summary>
+    public bool CanMeasureNow => IsConnected && HasTechnology && !IsSessionActive && !IsBusy && !IsMeasuring && SelectedChannel is not null;
+
+    partial void OnIsMeasuringChanged(bool value) => StartCommand.NotifyCanExecuteChanged();
+
+    /// <summary>Reads the battery voltage (output switched on only briefly at a very low voltage); safe to call at any time.</summary>
+    [RelayCommand]
+    private async Task MeasureVoltageAsync()
+    {
+        if (IsMeasuring) { _measureAgain = true; return; }
+        if (!CanMeasureNow) return;
+        IsMeasuring = true;
+        try
+        {
+            do
+            {
+                _measureAgain = false;
+                var cells = Cells;
+                var options = BuildOptions();
+                var v = await PreflightChecker.MeasureBatteryAsync(SelectedChannel!.Channel, Technology, cells, options, CancellationToken.None);
+                BatteryVoltageText = DescribeVoltage(v, cells, options);
+                BatteryVoltageStamp = DateTime.Now.ToString("HH:mm:ss");
+            }
+            while (_measureAgain && !IsSessionActive && !IsBusy);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Battery voltage measurement failed");
+            BatteryVoltageText = "could not measure: " + ex.Message;
+        }
+        finally { IsMeasuring = false; }
+    }
+
+    private static string DescribeVoltage(double v, int cells, ProfileOptions options)
+    {
+        if (v < -0.1) return $"reverse polarity? {v:0.000} V";
+        if (v / cells < options.RefuseBelowVoltagePerCell) return $"no battery detected, or deeply discharged ({v:0.000} V)";
+        return $"{v:0.000} V ({v / cells:0.00} V per cell)";
+    }
+
+    /// <summary>The page became visible: keep the displayed voltage fresh so plugging in a battery shows up.</summary>
+    public void OnPageShown()
+    {
+        _measureTimer ??= CreateMeasureTimer();
+        _measureTimer.Start();
+        _ = MeasureVoltageAsync();
+    }
+
+    public void OnPageHidden() => _measureTimer?.Stop();
+
+    private DispatcherQueueTimer CreateMeasureTimer()
+    {
+        var t = _dispatcher.CreateTimer();
+        t.Interval = TimeSpan.FromSeconds(10);
+        t.Tick += (_, _) => { if (CanMeasureNow) _ = MeasureVoltageAsync(); };
+        return t;
+    }
+
     // ---------------------------------------------------------------- session
 
     public ChartBuffer Chart { get; } = new();
     public event EventHandler? ChartInvalidated;
 
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowSetup), nameof(ShowCharging))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowSetup), nameof(ShowCharging), nameof(CanMeasureNow))]
     private bool _isSessionActive;
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowSetup), nameof(ShowCharging))]
     private bool _hasResult;
@@ -535,7 +605,7 @@ public sealed partial class SupplyViewModel : ObservableObject
     private string? _baseNavTitle;
 
     private bool CanStart() =>
-        IsConnected && !IsBusy && !IsSessionActive && HasTechnology && HasCapacity && SelectedChannel is not null && Profile is { IsValid: true };
+        IsConnected && !IsBusy && !IsMeasuring && !IsSessionActive && HasTechnology && HasCapacity && SelectedChannel is not null && Profile is { IsValid: true };
 
     [RelayCommand(CanExecute = nameof(CanStart))]
     private async Task StartAsync()
@@ -566,13 +636,11 @@ public sealed partial class SupplyViewModel : ObservableObject
                 return;
 
             BusyText = "Running preflight checks...";
-            var pre = await PreflightChecker.RunAsync(channel, profile, CancellationToken.None);
+            var pre = await PreflightChecker.RunAsync(channel, profile, CancellationToken.None, allowLowVoltage: true);
             var lowVoltageStart = false;
-            if (pre is { Refused: true, LowVoltageOverridable: true } && await _dialogs.ConfirmAsync("Battery voltage very low",
-                    pre.Refusal + "\n\nThe battery may only be deeply discharged. You can try a gentle pre-charge at a low current; "
-                    + "it is stopped automatically if the voltage does not recover. Only do this if you know the battery is intact.",
-                    "Try charging anyway", "Cancel"))
+            if (pre.LowVoltage)
             {
+                // Deeply discharged (or nothing connected): start with a gentle pre-charge; the confirmation shows the warning.
                 profile = profile.WithRecoveryStage();
                 Profile = profile;
                 pre = PreflightChecker.Evaluate(profile, pre.BatteryVolts, pre.Snapshot, allowLowVoltage: true);
@@ -666,6 +734,7 @@ public sealed partial class SupplyViewModel : ObservableObject
         _activeLogger = null;
         await session.DisposeAsync();
         await logger.DisposeAsync();
+        await MeasureVoltageAsync();                  // rest voltage after the charge, shown in the result card
         _log.LogInformation("Charge ended on {Supply}: {Reason} - {Message}", Model, result.Reason, result.Message);
     }
 

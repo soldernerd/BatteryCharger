@@ -65,7 +65,7 @@ public sealed class DialogService(WindowContext window)
         return r == ContentDialogResult.Primary && text.Length > 0 ? text : null;
     }
 
-    /// <summary>Shows the preflight summary and the mandatory safety checklist. Start stays disabled until all boxes are ticked.</summary>
+    /// <summary>Shows what is about to happen (supply, battery, measured voltage, warnings) with a single confirm button.</summary>
     public async Task<bool> ConfirmChargeAsync(ChargeProfile profile, PreflightResult pre, string supplyText, string? outputWarning)
     {
         var panel = new StackPanel { Spacing = 8, MaxWidth = 560 };
@@ -85,28 +85,14 @@ public sealed class DialogService(WindowContext window)
         foreach (var w in pre.Warnings.Concat(profile.Warnings)) Text(w, warn: true);
         if (outputWarning is not null) Text(outputWarning, warn: true);
 
-        var boxes = new[]
-        {
-            new CheckBox { Content = "The battery polarity is correct (red to +, black to -)." },
-            new CheckBox { Content = "Technology and cell count are correct." },
-            new CheckBox { Content = "The battery is undamaged: not swollen, hot or leaking." },
-            new CheckBox { Content = "I will supervise this charge." },
-        };
-        foreach (var cb in boxes) panel.Children.Add(cb);
-        Text("If this PC or the app stops, the supply keeps its output on with the last voltage and current limits. " +
-             "Hardware regulation stays active but there is no time cutoff.", warn: true);
-
         var dlg = new ContentDialog
         {
-            Title = "Confirm before charging",
+            Title = "Start charging?",
             Content = new ScrollViewer { Content = panel, MaxHeight = 520 },
             PrimaryButtonText = "Start charging",
             CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-            IsPrimaryButtonEnabled = false,
+            DefaultButton = ContentDialogButton.Primary,
         };
-        void Update(object? s, RoutedEventArgs e) => dlg.IsPrimaryButtonEnabled = boxes.All(c => c.IsChecked == true);
-        foreach (var cb in boxes) { cb.Checked += Update; cb.Unchecked += Update; }
         return await ShowAsync(dlg) == ContentDialogResult.Primary;
     }
 

@@ -114,6 +114,44 @@ public class PreflightTests
         Assert.True(p.Stages.Count == NiMH1Cell().Stages.Count + 1);
     }
 
+    private static readonly ProfileOptions NiMHOptions = ProfileOptions.Defaults(BatteryTechnology.NiMH);
+
+    [Fact]
+    public async Task IdleMeasurementProbesAndLeavesTheOutputOff()
+    {
+        var ch = new ZeroWhenOffChannel(batteryVolts: 1.3);
+        var v = await PreflightChecker.MeasureBatteryAsync(ch, BatteryTechnology.NiMH, 1, NiMHOptions, CancellationToken.None);
+        Assert.Equal(1.3, v, 3);
+        Assert.True(ch.WasOnDuringProbe);
+        Assert.False(ch.OutputOn);
+    }
+
+    [Fact]
+    public async Task IdleMeasurementWithoutBatteryReadsTheProbeVoltage()
+    {
+        var ch = new ZeroWhenOffChannel(batteryVolts: 0);
+        var v = await PreflightChecker.MeasureBatteryAsync(ch, BatteryTechnology.NiMH, 1, NiMHOptions, CancellationToken.None);
+        Assert.True(v < NiMHOptions.RefuseBelowVoltagePerCell);
+        Assert.False(ch.OutputOn);
+    }
+
+    [Fact]
+    public async Task IdleMeasurementNeverEnablesTheOutputOnReversePolarity()
+    {
+        var ch = new ZeroWhenOffChannel(batteryVolts: -0.8, readsBatteryWhenOff: true);
+        var v = await PreflightChecker.MeasureBatteryAsync(ch, BatteryTechnology.NiMH, 1, NiMHOptions, CancellationToken.None);
+        Assert.True(v < -0.1);
+        Assert.False(ch.WasOnDuringProbe);
+    }
+
+    [Fact]
+    public void LowVoltageIsFlaggedWhenAllowed()
+    {
+        var p = NiMH1Cell().WithRecoveryStage();
+        Assert.True(PreflightChecker.Evaluate(p, 0.3, allowLowVoltage: true).LowVoltage);
+        Assert.False(PreflightChecker.Evaluate(p, 1.2, allowLowVoltage: true).LowVoltage);
+    }
+
     /// <summary>Models a supply whose terminals read 0 V with the output off and show max(battery, set voltage) when on.</summary>
     private sealed class ZeroWhenOffChannel(double batteryVolts, bool readsBatteryWhenOff = false) : IPowerSupplyChannel
     {

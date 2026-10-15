@@ -64,6 +64,12 @@
 
             <TextBlock Text="About" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0"/>
             <TextBlock Text="{x:Bind ViewModel.VersionText}"/>
+            <TextBlock Text="Copyright (C) 2026 Lukas Fässler" TextWrapping="Wrap"/>
+            <TextBlock Text="Free software under the GNU General Public License, version 3 or later. No warranty." TextWrapping="Wrap"/>
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <HyperlinkButton Content="License text" NavigateUri="https://www.gnu.org/licenses/gpl-3.0.html" Padding="0"/>
+                <HyperlinkButton Content="Source on GitHub" NavigateUri="https://github.com/soldernerd/BatteryCharger" Padding="0"/>
+            </StackPanel>
             <TextBlock Text="{x:Bind ViewModel.VisaText}" TextWrapping="Wrap"/>
             <TextBlock IsTextSelectionEnabled="True" TextWrapping="Wrap" Text="{x:Bind ViewModel.SettingsPath}"/>
             <TextBlock IsTextSelectionEnabled="True" TextWrapping="Wrap" Text="{x:Bind ViewModel.DiagnosticsPath}"/>

@@ -93,7 +93,8 @@ See [the specification](battery-charger-spec.md) for the complete rules.
 - **No remote sensing.** The measured voltage is at the supply terminals; at high current the true CV point at the
   cells is slightly lower.
 - The supply cannot sink current: a battery above the target voltage is refused instead of being discharged.
-- v1 does not do discharging, cycling, HV-LiPo, custom chemistries or several simultaneous sessions.
+- v1 does not do discharging, cycling, HV-LiPo or custom chemistries. Every supply has its own tab and several supplies can
+  charge at the same time.
 - Several SCPI commands could not be checked without hardware; see [docs/verification-checklist.md](docs/verification-checklist.md).
 
 ## Deviations from the specification
@@ -105,3 +106,13 @@ See [the specification](battery-charger-spec.md) for the complete rules.
 - NiMH/NiCd CC timeout ends the charge with a warning (timer termination) rather than a fault.
 - A sudden >10x drop of the charge current between samples is treated as "battery disconnected" (a disconnect otherwise looks
   like a finished CV stage, because the supply sits at its voltage setpoint with I = 0).
+
+## License
+
+Copyright (C) 2026 Lukas Fässler
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.

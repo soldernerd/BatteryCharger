@@ -22,5 +22,6 @@ Spec: `battery-charger-spec.md` (authoritative). Overview and deviations: `READM
   `dotnet build src/BatteryCharger.App -c Release` writes to `bin\Release\...` (no `x64` folder).
 - GUI checks without a mouse: launch the exe, drive it with UI Automation (PowerShell `System.Windows.Automation`) and
   screenshot via `Graphics.CopyFromScreen`; NavigationView children added at run time need `IsExpanded` toggled to appear.
+- License: GPL v3 or later (`LICENSE`, same setup as LevelApp: README section, About text in Settings; no per-file headers).
 - Release: bump `src/BatteryCharger.Core/AppVersion.cs`; the CI publishes a release for each new version on `master`.
 - Editing XAML is the risky part of builds here: a full `dotnet build` of the App takes minutes and its errors can be opaque.

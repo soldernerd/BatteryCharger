@@ -12,7 +12,8 @@ public sealed record PreflightResult(
     IReadOnlyList<string> Hints,
     int InitialStageIndex,
     ChannelSnapshot? Snapshot,
-    bool LowVoltageOverridable = false)
+    bool LowVoltageOverridable = false,
+    bool LowVoltage = false)
 {
     public bool Refused => Refusal is not null;
 }
@@ -29,13 +30,17 @@ public static class PreflightChecker
         var chem = CellChemistryInfo.For(profile.Battery.Technology);
         string? refusal = null;
         var overridable = false;
+        var lowVoltage = false;
 
         if (!profile.IsValid)
             refusal = "The charge profile is not valid: " + string.Join(" ", profile.Errors);
         else if (vbat < -0.1)
             refusal = $"Reverse polarity detected ({vbat:0.00} V).";
         else if (vbat / cells < profile.Options.RefuseBelowVoltagePerCell && allowLowVoltage)
-            warnings.Add($"Battery voltage is very low ({vbat / cells:0.00} V/cell): starting with a gentle pre-charge. The battery may not recover; stop if the voltage does not rise.");
+        {
+            lowVoltage = true;
+            warnings.Add($"Battery voltage is very low ({vbat / cells:0.00} V/cell), or no battery is connected: starting with a gentle pre-charge. The battery may not recover.");
+        }
         else if (vbat / cells < profile.Options.RefuseBelowVoltagePerCell)
         {
             overridable = true;
@@ -54,10 +59,10 @@ public static class PreflightChecker
             if (vbat >= 0.99 * profile.TargetPackVolts && !chem.IsNickel)
                 warnings.Add("Battery appears already charged.");
             initial = profile.InitialStageIndex(allowLowVoltage ? Math.Min(vbat, profile.RefuseBelowPackVolts) : vbat);
-            if (profile.Stages[initial] is PrechargeStage)
+            if (profile.Stages[initial] is PrechargeStage && !lowVoltage)
                 warnings.Add("Battery voltage is low: starting with a pre-charge stage.");
         }
-        return new PreflightResult(vbat, refusal, warnings, hints, initial, snapshot, overridable);
+        return new PreflightResult(vbat, refusal, warnings, hints, initial, snapshot, overridable, lowVoltage);
     }
 
     /// <summary>
@@ -71,8 +76,33 @@ public static class PreflightChecker
         var m = await channel.MeasureAsync(ct);
         var vbat = m.Volts;   // a negative reading is reverse polarity: never probe with the output on
         if (profile.IsValid && vbat >= -0.1 && vbat / profile.Battery.CellsInSeries < profile.Options.RefuseBelowVoltagePerCell)
-            vbat = await ProbeAsync(channel, profile, ct);
+            vbat = await ProbeAsync(channel, 0.8 * profile.Options.RefuseBelowVoltagePerCell * profile.Battery.CellsInSeries,
+                Math.Min(ProbeCurrentAmps, profile.Stages[0].Amps), profile.OvpVolts, ct);
         return Evaluate(profile, vbat, snapshot, allowLowVoltage);
+    }
+
+    /// <summary>
+    /// Measures the battery voltage outside a charge (idle display). Switches the output off, reads the terminals and, when
+    /// that looks empty, probes with the output briefly on. The supply's previous setpoints are restored afterwards and the
+    /// output is left off. A negative reading (reverse polarity) is returned without ever enabling the output.
+    /// </summary>
+    public static async Task<double> MeasureBatteryAsync(IPowerSupplyChannel channel, BatteryTechnology technology, int cells,
+        ProfileOptions options, CancellationToken ct)
+    {
+        var snapshot = await channel.ReadStateAsync(ct);
+        await channel.SetOutputAsync(false, ct);
+        var vbat = (await channel.MeasureAsync(ct)).Volts;
+        if (vbat < -0.1 || vbat / cells >= options.RefuseBelowVoltagePerCell) return vbat;
+        var ovp = cells * (options.TargetVoltagePerCell + options.OvpMarginPerCell);
+        try
+        {
+            return await ProbeAsync(channel, 0.8 * options.RefuseBelowVoltagePerCell * cells, ProbeCurrentAmps, ovp, ct);
+        }
+        finally
+        {
+            try { await channel.RestoreAsync(snapshot, CancellationToken.None); }
+            catch (InstrumentException) { /* the reading matters more than restoring the front-panel setpoints */ }
+        }
     }
 
     /// <summary>
@@ -81,12 +111,10 @@ public static class PreflightChecker
     /// battery reads the probe voltage itself and is still refused. Current is limited and OVP is armed; the output is
     /// always switched off again, and the session configures its real setpoints afterwards.
     /// </summary>
-    private static async Task<double> ProbeAsync(IPowerSupplyChannel channel, ChargeProfile profile, CancellationToken ct)
+    private static async Task<double> ProbeAsync(IPowerSupplyChannel channel, double probeVolts, double probeAmps, double ovpVolts, CancellationToken ct)
     {
-        var probeVolts = 0.8 * profile.Options.RefuseBelowVoltagePerCell * profile.Battery.CellsInSeries;
-        var probeAmps = Math.Min(ProbeCurrentAmps, profile.Stages[0].Amps);
         // VERIFY: item 13 of docs/verification-checklist.md (MEAS:VOLT? with the output off reads 0 V on the E36103A).
-        await channel.ConfigureAsync(new ChargeSetpoint(probeVolts, probeAmps, profile.OvpVolts), ct);
+        await channel.ConfigureAsync(new ChargeSetpoint(probeVolts, probeAmps, ovpVolts), ct);
         try
         {
             await channel.SetOutputAsync(true, ct);
